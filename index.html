@@ -1,0 +1,3370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pac-Rush - 3D Multiplayer Race</title>
+    <script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js')
+          .then(() => console.log('Service Worker registrado correctamente'))
+          .catch(err => console.log('Error al registrar:', err));
+    }
+    </script>
+    <link rel="manifest" href="manifest.json">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- Seedrandom for consistent track generation across peers -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
+    <style>
+        :root { --neon-blue: #00f3ff; --neon-pink: #ff00ea; --neon-green: #39ff14; --neon-gold: #ffd700; --bg-color: #05050a; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Courier New', Courier, monospace; user-select: none; }
+        body { background-color: var(--bg-color); color: white; overflow: hidden; touch-action: none; }
+        
+        /* UI Styles */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle, #0b0c1b 0%, #000000 100%); transition: opacity 0.5s; overflow-y: auto;}
+        .panel { background: rgba(10, 10, 25, 0.95); border: 2px solid var(--neon-blue); box-shadow: 0 0 15px var(--neon-blue); padding: 20px; border-radius: 10px; width: 90%; max-width: 480px; text-align: center; display: none; margin: 20px 0; max-height: 90vh; overflow-y: auto; }
+        .active-panel { display: flex; flex-direction: column; gap: 15px; }
+        h1 { color: var(--neon-blue); text-shadow: 0 0 10px var(--neon-blue); font-size: 2rem; margin-bottom: 10px; text-transform: uppercase; }
+        h2 { color: var(--neon-pink); font-size: 1.2rem; margin-top: 5px; }
+        
+        input[type="text"], select { background: rgba(0,0,0,0.7); border: 1px solid var(--neon-pink); color: white; padding: 10px; border-radius: 5px; text-align: center; font-size: 1.1rem; outline: none; width: 100%; }
+        select option { background: #0a0a19; color: white; }
+        select option:disabled { color: #555; background: #020205; }
+        input[type="color"] { width: 100%; height: 40px; border: none; cursor: pointer; background: transparent; }
+        input[type="file"] { display: none; }
+        .file-lbl { background: var(--neon-pink); color: white; padding: 10px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        
+        button { background: transparent; border: 2px solid var(--neon-blue); color: var(--neon-blue); padding: 10px 20px; font-size: 1.2rem; cursor: pointer; border-radius: 5px; text-transform: uppercase; font-weight: bold; transition: 0.2s; }
+        button:active { background: var(--neon-blue); color: #000; }
+        
+        .profile-pic { width: 80px; height: 80px; border-radius: 50%; border: 2px solid var(--neon-blue); object-fit: cover; margin: 0 auto; }
+        .stats { color: var(--neon-pink); font-size: 1.1rem; text-shadow: 0 0 5px var(--neon-pink); }
+        
+        /* Lobby */
+        #qrcode { background: white; padding: 10px; margin: 10px auto; border-radius: 10px; width: fit-content; }
+        .player-list { list-style: none; text-align: left; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; max-height: 120px; overflow-y: auto; }
+        .player-list li { margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 5px; display: flex; align-items: center; gap: 10px; }
+        .player-list img { width: 30px; height: 30px; border-radius: 50%; }
+
+        /* Achievements Panel Styles */
+        .achievement-grid { display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; text-align: left; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; border: 1px solid #333; }
+        .achievement-item { display: flex; justify-content: space-between; align-items: center; padding: 6px; border-bottom: 1px dashed #444; font-size: 0.8rem; }
+        .achievement-item.unlocked { border-left: 3px solid var(--neon-green); background: rgba(57, 255, 20, 0.05); }
+        .achievement-item.locked { opacity: 0.5; }
+        .achievement-title { font-weight: bold; color: var(--neon-blue); }
+        .achievement-desc { font-size: 0.75rem; color: #bbb; }
+        .achievement-status { font-weight: bold; }
+
+        /* Shop Grid Styles */
+        .shop-grid { display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto; text-align: left; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; border: 1px solid #333; }
+        .shop-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #222; font-size: 0.85rem; }
+        .shop-item-details { display: flex; flex-direction: column; gap: 2px; }
+        .shop-item-name { font-weight: bold; color: var(--neon-blue); font-size: 0.95rem; }
+        .shop-item-desc { font-size: 0.75rem; color: #bbb; }
+        .shop-item-level { font-size: 0.8rem; color: var(--neon-gold); font-weight: bold; }
+        .shop-btn { font-size: 0.8rem; padding: 6px 12px; border-color: var(--neon-gold); color: var(--neon-gold); border-radius: 4px; background: transparent; }
+        .shop-btn:active { background: var(--neon-gold); color: #000; }
+        .shop-btn:disabled { opacity: 0.4; border-color: #555; color: #555; cursor: not-allowed; }
+
+        /* League Progression Box */
+        .league-progress-box { background: rgba(0,0,0,0.5); border: 1px solid var(--neon-gold); padding: 10px; border-radius: 5px; font-size: 0.85rem; text-align: left; }
+        .league-title-display { font-size: 1.1rem; font-weight: bold; color: var(--neon-gold); text-shadow: 0 0 5px var(--neon-gold); margin-bottom: 5px; text-align: center; }
+        
+        /* Game Overlay */
+        #game-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; display: none; pointer-events: none; }
+        #minimap { position: absolute; top: 10px; right: 10px; width: 120px; height: 120px; background: rgba(0,0,0,0.7); border: 2px solid var(--neon-blue); border-radius: 5px; }
+        #leaderboard { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-left: 3px solid var(--neon-pink); color: white; font-size: 0.8rem;}
+        
+        #item-slot { position: absolute; top: 140px; right: 10px; width: 60px; height: 60px; background: rgba(0,0,0,0.8); border: 2px dashed gold; border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 1.6rem; }
+        #item-name-hud { font-size: 0.45rem; color: white; text-align: center; font-weight: bold; margin-top: 2px; }
+
+        /* Dash Gauge */
+        #dash-gauge-container { position: absolute; top: 210px; right: 10px; width: 60px; height: 12px; background: rgba(0,0,0,0.8); border: 1px solid cyan; border-radius: 3px; overflow: hidden; }
+        #dash-gauge-bar { width: 0%; height: 100%; background: #00f3ff; transition: width 0.1s; }
+
+        /* Lives HUD Display */
+        #lives-hud { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); border: 2px solid #ffff00; border-radius: 8px; padding: 6px 16px; color: #ffff00; font-weight: bold; font-size: 1.1rem; text-shadow: 0 0 5px rgba(255, 255, 0, 0.5); display: flex; align-items: center; gap: 5px; }
+
+        /* Shield / Active Status Display */
+        #status-effects-hud { position: absolute; top: 50px; left: 10px; color: var(--neon-green); font-size: 0.75rem; background: rgba(0,0,0,0.6); padding: 5px; border-radius: 3px; display: none; pointer-events: none;}
+
+        /* Finish Status Banner Overlay */
+        #finish-status { position: absolute; top: 50px; left: 50%; transform: translateX(-50%); background: rgba(0, 10, 20, 0.95); border: 3px solid var(--neon-blue); border-radius: 10px; padding: 15px 30px; color: #fff; font-weight: bold; font-size: 1.5rem; text-align: center; display: none; z-index: 1001; box-shadow: 0 0 20px rgba(0, 243, 255, 0.8); }
+
+        /* Achievement Notification popup */
+        #achievement-popup { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0, 255, 22, 0.95); border: 2px solid #ffffff; box-shadow: 0 0 15px var(--neon-green); padding: 12px 24px; border-radius: 8px; color: #000; font-weight: bold; z-index: 1005; display: none; text-align: center; font-size: 0.95rem; }
+
+        /* Mobile Controls */
+        .controls { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; pointer-events: auto; align-items: flex-end; }
+        .btn-dir, .btn-action { width: 60px; height: 60px; background: rgba(0, 243, 255, 0.2); border: 2px solid var(--neon-blue); border-radius: 50%; color: white; font-size: 1.5rem; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); margin: 5px;}
+        .btn-dir:active, .btn-action:active { background: rgba(0, 243, 255, 0.6); }
+        .d-pad { display: flex; }
+        .center-pad { display: flex; flex-direction: column; align-items: center; gap: 8px;}
+        .btn-item { width: 70px; height: 70px; background: rgba(255, 215, 0, 0.3); border-color: gold; color: gold; font-size: 1.2rem; border-radius: 10px;}
+        .btn-item:active { background: rgba(255, 215, 0, 0.7); color: black;}
+        
+        .btn-dash { width: 70px; height: 45px; background: rgba(0, 243, 255, 0.2); border-color: #00f3ff; color: #00f3ff; font-size: 0.9rem; border-radius: 8px; text-transform: uppercase; font-weight: bold;}
+        .btn-dash:active { background: rgba(0, 243, 255, 0.8); color: black; }
+        .btn-dash.ready { animation: dashPulse 0.5s infinite alternate; }
+
+        @keyframes dashPulse {
+            from { box-shadow: 0 0 5px #00f3ff; border-color: #00f3ff; }
+            to { box-shadow: 0 0 15px #00f3ff; border-color: #fff; }
+        }
+
+        .a-pad { display: flex; flex-direction: column; align-items: center; }
+        .a-pad-row { display: flex; }
+
+        /* Countdown Overlay Screen */
+        #countdown-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        #countdown-text {
+            font-size: 8rem;
+            font-weight: 900;
+            color: var(--neon-pink);
+            text-shadow: 0 0 30px var(--neon-pink), 0 0 60px #000;
+            font-family: 'Courier New', monospace;
+            animation: countdownPulse 0.5s ease-out infinite alternate;
+        }
+        @keyframes countdownPulse {
+            from { transform: scale(0.8); }
+            to { transform: scale(1.2); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Ready? Go! Screen Countdown Overlay -->
+    <div id="countdown-overlay">
+        <div id="countdown-text">READY?</div>
+    </div>
+
+    <!-- Real-time Achievement Unlocked Notification Popup -->
+    <div id="achievement-popup">
+        🏆 ACHIEVEMENT UNLOCKED!<br><span id="achievement-popup-title" style="font-size: 1.1rem; text-decoration: underline;">First Steps</span>
+    </div>
+
+    <div id="ui-layer">
+        <div id="panel-profile" class="panel active-panel">
+            <h1>Pac-Rush</h1>
+            <img id="preview-pic" class="profile-pic" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" alt="Profile">
+            
+            <div class="league-progress-box">
+                <div class="league-title-display" id="league-full-title">Bronze I</div>
+                <div class="stats" style="text-align: center; margin-bottom: 5px;">🏆 Trophies: <span id="trophy-count">0</span></div>
+                <div class="stats" style="text-align: center; color: var(--neon-gold); font-size: 1rem;">🪙 Pac-Coins: <span id="coin-count">0</span></div>
+                <div style="font-size: 0.75rem; margin-top: 5px; text-align: center; color: #aaa;" id="league-next-unlock">Next: Bronze II at 100 Trophies</div>
+            </div>
+
+            <input type="text" id="player-name" placeholder="Your Name" maxlength="12" value="Pac-Copilot">
+            <label class="file-lbl">Photo<input type="file" id="file-pic" accept="image/*"></label>
+            <label>Cart Color:</label><input type="color" id="player-color" value="#00f3ff">
+            
+            <label style="margin-top: 5px; font-weight: bold; color: var(--neon-pink);">Choose Copilot Skin:</label>
+            <select id="player-copilot" onchange="saveProfileData()">
+                <!-- Options are updated dynamically by JS based on current League level -->
+            </select>
+            
+            <button onclick="saveProfileData().then(() => showPanel('panel-menu'))">Enter</button>
+        </div>
+
+        <div id="panel-menu" class="panel">
+            <h1>Multiplayer</h1>
+            <button onclick="hostGame()">Create Lobby (Host)</button>
+            <hr style="border-color:#333">
+            <input type="text" id="join-code" placeholder="10-Digit Room Code" maxlength="10">
+            <button style="border-color: var(--neon-pink); color: var(--neon-pink)" onclick="joinGame()">Join Lobby</button>
+            <hr style="border-color:#333">
+            <button onclick="showShop()" style="border-color: var(--neon-gold); color: var(--neon-gold); font-size: 1.1rem; width: 100%;">🛒 Power-up Store</button>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <button onclick="showPanel('panel-achievements')" style="border-color: var(--neon-green); color: var(--neon-green); font-size: 0.9rem;">🏆 Achievements</button>
+                <button onclick="showPanel('panel-tutorial')" style="border-color: gold; color: gold; font-size: 0.9rem;">📖 How to Play</button>
+            </div>
+            <button onclick="showPanel('panel-profile')" style="font-size: 0.8rem; border:none;">Back to Profile</button>
+        </div>
+
+        <!-- Infinite Upgrade Store Panel -->
+        <div id="panel-shop" class="panel">
+            <h1>Neon Upgrades</h1>
+            <div class="stats" style="color: var(--neon-gold); margin-bottom: 10px;">🪙 Pac-Coins: <span id="shop-coins">0</span></div>
+            <p style="font-size:0.75rem; color:#aaa; margin-bottom:10px;">Each infinite level increases active power-up effects by +20%.</p>
+            <div class="shop-grid" id="shop-list-container">
+                <!-- Shop items dynamically generated here -->
+            </div>
+            <button onclick="showPanel('panel-menu')" style="margin-top:10px; width:100%;">Back</button>
+        </div>
+
+        <div id="panel-achievements" class="panel">
+            <h1>Achievements</h1>
+            <div class="achievement-grid" id="achievements-list-container">
+                <!-- Achievement items generated dynamically -->
+            </div>
+            <button onclick="showPanel('panel-menu')" style="margin-top:10px; width:100%;">Back</button>
+        </div>
+
+        <div id="panel-tutorial" class="panel" style="text-align: left; font-size: 0.9rem;">
+            <h1 style="text-align: center;">How to Play</h1>
+            <p><strong>Goal:</strong> Reach the finish line before others while dodging obstacles. If you crash, you restart at the beginning.</p>
+            <h2>Controls (4 Rails):</h2>
+            <p>◀ ▶ or [A / D]: Switch between the 4 fixed rail tracks.</p>
+            <p>⬆ or [W / Space]: Jump to dodge low obstacles.</p>
+            <p>+ / - or [E / Q]: Accelerate or decelerate your mine cart.</p>
+            <h2>Power-Ups (Rainbow Pellets 🌈):</h2>
+            <p>Collide with a rainbow pellet to gain a Pac-Ability. Activate it with the yellow [USE] button or [S].</p>
+            <ul style="max-height: 150px; overflow-y: auto; list-style-type: none; padding-left: 5px;" id="tutorial-powerups-list">
+                <!-- Power-ups dynamically loaded -->
+            </ul>
+            <h2>Pac-Dots & Dash:</h2>
+            <p>Collect yellow dots scattered on the rails. Collect 10 dots to charge up your <b>QUICK DASH</b>! Fire with [Shift] or the blue [DASH] button.</p>
+            <button onclick="showPanel('panel-menu')" style="margin-top:15px; width:100%; display:block;">Close</button>
+        </div>
+
+        <div id="panel-lobby" class="panel">
+            <h1>Lobby Status</h1>
+            <h3 style="color: var(--neon-blue); letter-spacing: 2px;" id="room-code-display">Loading...</h3>
+            <div id="qrcode"></div>
+            
+            <div id="map-selection" style="margin: 10px 0; display:none;">
+                <label style="color:var(--neon-pink);">Map:</label>
+                <select id="map-select" onchange="updateLobbyState()">
+                    <option value="caves">The Adventure Caves⛏️</option>
+                    <option value="geode">The Geode Mines💎</option>
+                    <option value="lava">The Lava World🌋</option>
+                    <option value="neon_city">Neon City 🌃</option>
+                    <option value="frozen_peaks">Frozen Peaks ❄️</option>
+                    <option value="jungle_ruins">Jungle Ruins 🌿</option>
+                    <option value="space_station">Space Station 🚀</option>
+                    <option value="crystal_ocean">Crystal Ocean 🌊</option>
+                    <option value="ghost_railway">Ghost Railway 👻</option>
+                    <option value="storm_valley">Storm Valley ⚡</option>
+                    <option value="desert_canyon">Desert Canyon 🏜️</option>
+                    <option value="mushroom_kingdom">Mushroom Kingdom 🍄</option>
+                    <option value="robot_factory">Robot Factory 🤖</option>
+                    <option value="volcano_core">Volcano Core 🌋</option>
+                    <option value="rainbow_dimension">Rainbow Dimension 🌈</option>
+                    <option value="retro_arcade">Retro Arcade 🕹️</option>
+                </select>
+
+                <!-- NEW: Selectable map length dropdown -->
+                <div style="margin-top: 10px;">
+                    <label style="color:var(--neon-green);">Track Length:</label>
+                    <select id="length-select" onchange="updateLobbyState()">
+                        <option value="short">Short (1000m) ⚡</option>
+                        <option value="medium" selected>Medium (2000m) ⚙️</option>
+                        <option value="long">Long (4000m) 🚀</option>
+                        <option value="xl">XL (6000m) 🌋</option>
+                        <option value="xxl">XXL (10000m) 👑</option>
+                    </select>
+                </div>
+            </div>
+            
+            <p id="client-map-display" style="color:var(--neon-pink); display:none; margin: 5px 0;"></p>
+            <p id="client-length-display" style="color:var(--neon-green); display:none; margin: 5px 0;"></p>
+
+            <p id="lobby-status">Waiting for exactly 2-8 players...</p>
+            <ul class="player-list" id="lobby-players"></ul>
+            <button id="btn-start" onclick="startGameHost()" style="display: none; background: var(--neon-pink); color: white;">Start Race</button>
+            <button onclick="leaveLobby()" style="margin-top:10px; border:none; font-size:0.8rem;">Leave Lobby</button>
+        </div>
+        
+        <div id="panel-end" class="panel">
+            <h1 id="end-title">Finished!</h1>
+            <div id="end-stats" class="stats" style="margin-bottom: 20px;"></div>
+            <button onclick="leaveLobby()">Back to Menu</button>
+        </div>
+    </div>
+
+    <div id="game-overlay">
+        <canvas id="minimap" width="120" height="120"></canvas>
+        <div id="leaderboard"></div>
+        <div id="item-slot">
+            <span id="item-emoji-hud">❓</span>
+            <span id="item-name-hud">NO ITEM</span>
+        </div>
+        <div id="dash-gauge-container"><div id="dash-gauge-bar"></div></div>
+        
+        <!-- Lives HUD overlay -->
+        <div id="lives-hud">LIVES: <span id="lives-count">10</span></div>
+
+        <!-- Shield / Active status indicator -->
+        <div id="status-effects-hud">SHIELD ACTIVE</div>
+
+        <!-- Finish Rank Status Banner -->
+        <div id="finish-status">FINISHED!<br><span id="finish-rank-text" style="font-size: 2.2rem; text-shadow: 0 0 10px var(--neon-blue); color: var(--neon-blue);">1st</span></div>
+
+        <div class="controls">
+            <div class="d-pad">
+                <div class="btn-dir" id="btn-left">◀</div>
+                <div class="btn-dir" id="btn-right">▶</div>
+            </div>
+            <div class="center-pad">
+                <button class="btn-action btn-item" id="btn-item">USE</button>
+                <button class="btn-dash" id="btn-dash-action">DASH</button>
+            </div>
+            <div class="a-pad">
+                <div class="btn-action" id="btn-jump" style="background: rgba(255, 0, 234, 0.3); border-color: var(--neon-pink);">⬆</div>
+                <div class="a-pad-row">
+                    <div class="btn-action" id="btn-slow">-</div>
+                    <div class="btn-action" id="btn-fast" style="background: rgba(0, 243, 255, 0.4);">+</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // INDEXEDDB DATABASE FOR STORAGE
+        // ==========================================
+        const DB_NAME = "MineRideDB";
+        const STORE_NAME = "profileStore";
+        const DB_VERSION = 2; // Incremented DB Version for Upgrades
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onupgradeneeded = e => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME);
+                    }
+                };
+                request.onsuccess = e => resolve(e.target.result);
+                request.onerror = e => reject(e.target.error);
+            });
+        }
+
+        function getProfile() {
+            return initDB().then(db => {
+                return new Promise((resolve) => {
+                    const tx = db.transaction(STORE_NAME, "readonly");
+                    const store = tx.objectStore(STORE_NAME);
+                    const req = store.get("user_profile");
+                    req.onsuccess = () => resolve(req.result || null);
+                    req.onerror = () => resolve(null);
+                });
+            });
+        }
+
+        function saveProfile(profileData) {
+            return initDB().then(db => {
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(STORE_NAME, "readwrite");
+                    const store = tx.objectStore(STORE_NAME);
+                    const req = store.put(profileData, "user_profile");
+                    req.onsuccess = () => resolve();
+                    req.onerror = () => reject(req.error);
+                });
+            });
+        }
+
+        // --- GHOST COLORS DEFINED ---
+        const GHOST_COLORS = [
+            0xff0000, // BLINKY (Red)
+            0xffb8ff, // PINKY (Pink)
+            0x00ffff, // INKY (Cyan)
+            0xffb852  // CLYDE (Orange)
+        ];
+
+        // ==========================================
+        // BASIC SYSTEMS AND AUDIO
+        // ==========================================
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playTone(freq, type, duration, vol=0.1) {
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+            osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(); 
+            osc.stop(audioCtx.currentTime + duration);
+            setTimeout(() => {
+                osc.disconnect();
+                gain.disconnect();
+            }, (duration + 0.1) * 1000);
+        }
+        const SFX = {
+            jump: () => playTone(600, 'square', 0.2, 0.1),
+            crash: () => { playTone(150, 'sawtooth', 0.3, 0.2); playTone(100, 'square', 0.4, 0.2); },
+            itemGet: () => { playTone(800, 'sine', 0.1); setTimeout(()=>playTone(1200, 'sine', 0.2), 100); },
+            itemUse: () => playTone(300, 'triangle', 0.3, 0.1),
+            waka: () => playTone(450, 'triangle', 0.08, 0.08),
+            dash: () => playTone(800, 'sawtooth', 0.25, 0.15),
+            win: () => { playTone(440, 'square', 0.1); setTimeout(()=>playTone(554, 'square', 0.1), 100); setTimeout(()=>playTone(659, 'square', 0.3), 200); },
+            upgrade: () => { playTone(523.25, 'sine', 0.1, 0.2); setTimeout(()=>playTone(659.25, 'sine', 0.1, 0.2), 80); setTimeout(()=>playTone(783.99, 'sine', 0.25, 0.2), 160); },
+            bgm: null
+        };
+        
+        function startBGM() { 
+            if(SFX.bgm) {
+                SFX.bgm.pause();
+                SFX.bgm.currentTime = 0;
+            } else {
+                SFX.bgm = new Audio("Pac-Rush ost.mp3");
+                SFX.bgm.loop = true;
+            }
+            SFX.bgm.play().catch(err => console.log("BGM playback started after interaction gesture restriction.", err));
+        }
+        
+        function stopBGM() { 
+            if(SFX.bgm) {
+                SFX.bgm.pause();
+            }
+        }
+
+        // ==========================================
+        // LEAGUE SYSTEM DEFINITION
+        // ==========================================
+        const LEAGUES = [
+            { id: "bronze_1", name: "Bronze I", threshold: 0, color: "#cd7f32" },
+            { id: "bronze_2", name: "Bronze II", threshold: 100, color: "#a05a2c" },
+            { id: "silver_1", name: "Silver I", threshold: 200, color: "#d1d1d1" },
+            { id: "silver_2", name: "Silver II", threshold: 300, color: "#9e9e9e" },
+            { id: "gold_1", name: "Gold I", threshold: 450, color: "#ffd700" },
+            { id: "gold_2", name: "Gold II", threshold: 600, color: "#cca100" },
+            { id: "platinum", name: "Platinum", threshold: 800, color: "#00e5ff" },
+            { id: "crystal", name: "Crystal", threshold: 1000, color: "#e040fb" },
+            { id: "neon_master", name: "Neon Master", threshold: 1500, color: "#39ff14" },
+            { id: "grandmaster", name: "Grandmaster", threshold: 2000, color: "#ff00ea" }
+        ];
+
+        function getLeagueByTrophies(trophies) {
+            let active = LEAGUES[0];
+            for (let i = 0; i < LEAGUES.length; i++) {
+                if (trophies >= LEAGUES[i].threshold) {
+                    active = LEAGUES[i];
+                }
+            }
+            return active;
+        }
+
+        // ==========================================
+        // COPILOT SKINS SPECIFICATION
+        // ==========================================
+        const SKINS = [
+            { id: "yellow", name: "Yellow Pac-Man (Classic)", color: 0xffff00, league: "bronze_1" },
+            { id: "green", name: "Green Pac-Man", color: 0x2ecc71, league: "bronze_2" },
+            { id: "blue", name: "Blue Pac-Man", color: 0x2980b9, league: "silver_1" },
+            { id: "lightblue", name: "Light Blue Pac-Man", color: 0x00f3ff, league: "silver_2" },
+            { id: "bronze", name: "Bronze Pac-Man", color: 0xcd7f32, league: "silver_2", isSpecial: true },
+            { id: "red", name: "Red Pac-Man", color: 0xe74c3c, league: "gold_1" },
+            { id: "silver", name: "Silver Pac-Man", color: 0xd1d1d1, league: "gold_1", isSpecial: true },
+            { id: "orange", name: "Orange Pac-Man", color: 0xe67e22, league: "gold_2" },
+            { id: "purple", name: "Purple Pac-Man", color: 0x8e44ad, league: "gold_2" },
+            { id: "gold", name: "Gold Pac-Man", color: 0xffd700, league: "platinum", isSpecial: true },
+            { id: "shadow", name: "Shadow Pac-Man", color: 0x111111, league: "crystal" },
+            { id: "neon_pink", name: "Neon Pink Pac-Man", color: 0xff00ea, league: "crystal" },
+            { id: "ruby", name: "Ruby Pac-Man", color: 0xd63031, league: "crystal", isSpecial: true },
+            { id: "sapphire", name: "Sapphire Pac-Man", color: 0x0984e3, league: "neon_master" },
+            { id: "emerald", name: "Emerald Pac-Man", color: 0x00b894, league: "neon_master" },
+            { id: "diamond", name: "Diamond Pac-Man", color: 0x00f3ff, league: "neon_master", isSpecial: true },
+            { id: "lava", name: "Lava Pac-Man", color: 0xff3300, league: "neon_master", isSpecial: true },
+            { id: "ice", name: "Ice Pac-Man", color: 0x74b9ff, league: "neon_master", isSpecial: true },
+            { id: "matrix", name: "Matrix Pac-Man", color: 0x39ff14, league: "grandmaster", isSpecial: true },
+            { id: "cosmic", name: "Cosmic Pac-Man", color: 0x2d3436, league: "grandmaster", isSpecial: true },
+            { id: "rainbow", name: "Rainbow Pac-Man", color: 0xffffff, league: "grandmaster", isSpecial: true }
+        ];
+
+        // ==========================================
+        // ACHIEVEMENTS SPECIFICATION (20 ARCHIVEMENTS)
+        // ==========================================
+        const ACHIEVEMENTS = [
+            { id: "first_steps", title: "First Steps", desc: "Access your profile screen for the first time.", checked: false },
+            { id: "first_race", title: "First Race", desc: "Start playing any level in the game.", checked: false },
+            { id: "winner_winner", title: "Winner Winner", desc: "Win first place in a multiplayer race.", checked: false },
+            { id: "double_digit", title: "Double Digit", desc: "Collect 10 Pac-Dots in a single level.", checked: false },
+            { id: "survival_master", title: "Survival Master", desc: "Finish a race without losing any of your lives.", checked: false },
+            { id: "speed_demon", title: "Speed Demon", desc: "Reach a swift speed over 6.0 units.", checked: false },
+            { id: "super_pac", title: "Super Pac", desc: "Collect 50 Pac-Dots in total overall.", checked: false },
+            { id: "pac_millionaire", title: "Pac-Millionaire", desc: "Collect 200 Pac-Dots in total overall.", checked: false },
+            { id: "bronze_legend", title: "Bronze Legend", desc: "Reach Bronze II League.", checked: false },
+            { id: "gold_standard", title: "Gold Standard", desc: "Reach Gold I League.", checked: false },
+            { id: "crystal_clear", title: "Crystal Clear", desc: "Reach Crystal League.", checked: false },
+            { id: "grandmaster_flash", title: "Grandmaster Flash", desc: "Reach the prestigious Grandmaster League.", checked: false },
+            { id: "rookie_host", title: "Rookie Host", desc: "Host a lobby for your friends.", checked: false },
+            { id: "rookie_guest", title: "Rookie Guest", desc: "Join another host's lobby.", checked: false },
+            { id: "full_arsenal", title: "Full Arsenal", desc: "Activate a power-up in any race.", checked: false },
+            { id: "waka_forever", title: "Waka Waka Forever", desc: "Participate in 5 completed races.", checked: false },
+            { id: "pac_destroyer", title: "Pac-Destroyer", desc: "Defeat an obstacle using a Power Pellet.", checked: false },
+            { id: "unstoppable", title: "Unstoppable", desc: "Finish any race with exactly 10 lives intact.", checked: false },
+            { id: "lucky_seven", title: "Lucky Seven", desc: "Finish any race with exactly 7 lives remaining.", checked: false },
+            { id: "slick_moves", title: "Slick Moves", desc: "Execute a quick lane dodge.", checked: false }
+        ];
+
+        // Global state profile variable
+        let profile = { 
+            name: "Ethan", 
+            pic: "", 
+            color: "#00f3ff", 
+            trophies: 0, 
+            coins: 100, // NEW Pac-Coins currency
+            powerupLevels: {}, // NEW: Tracks infinite levels for all 52 power-ups
+            copilotType: "yellow",
+            achievements: {},
+            totalDotsCollected: 0,
+            racesCompleted: 0
+        };
+
+        // ==========================================
+        // 52 POWER-UPS SYSTEM SPECIFICATION (30 + 22 NEW UNIQUE ONES)
+        // ==========================================
+        const POWERUPS = [
+            { id: "speed_boost", name: "Speed Boost", emoji: "🚀", desc: "Double speed boost." },
+            { id: "power_pellet", name: "Power Pellet", emoji: "🛡️", desc: "Invincibility, crash obstacles." },
+            { id: "freeze", name: "Freeze", emoji: "❄️", desc: "Encases other racers in ice." },
+            { id: "laser", name: "Laser", emoji: "🔫", desc: "Shoots beams forward to blast obstacles." },
+            { id: "cherry_bomb", name: "Cherry Bomb", emoji: "🍒", desc: "Spawns explosive cherry obstacle behind you." },
+            { id: "shield_barrier", name: "Shield Barrier", emoji: "🧤", desc: "Blocks next collision crash." },
+            { id: "ghost_cloak", name: "Ghost Cloak", emoji: "👻", desc: "Phases through obstacles safely." },
+            { id: "star_invincible", name: "Star Shield", emoji: "⭐", desc: "Grants shiny speed & invincibility." },
+            { id: "shockwave", name: "Shockwave", emoji: "⚡", desc: "Slows down opponents in vicinity." },
+            { id: "tornado_strike", name: "Tornado", emoji: "🌀", desc: "Mini-cyclone destroys tracks obstacles." },
+            { id: "bubble_float", name: "Bubble Float", emoji: "🧼", desc: "Hover above ground obstacles safely." },
+            { id: "autopilot", name: "Autopilot", emoji: "🤖", desc: "Auto-steers to bypass next obstacles." },
+            { id: "time_warp", name: "Time Warp", emoji: "⏰", desc: "Dilates time to slow other players." },
+            { id: "shock_blast", name: "Shock Blast", emoji: "💥", desc: "Clears tracks in immediate radius." },
+            { id: "lucky_clover", name: "Lucky Clover", emoji: "🍀", desc: "Instantly awards 5 Pac-Dots." },
+            { id: "gold_rush", name: "Gold Rush", emoji: "🪙", desc: "Instantly gains 2 Pac-Dots and triples speed." },
+            { id: "giant_pac", name: "Giant Pac-Man", emoji: "🦖", desc: "Grow huge and trample obstacles." },
+            { id: "decoy", name: "Decoy Cart", emoji: "🧸", desc: "Spawns a duplicate dummy cart." },
+            { id: "spicy_chili", name: "Spicy Chili", emoji: "🌶️", desc: "Extreme speed boost with sparks." },
+            { id: "smoke_screen", name: "Smoke Screen", emoji: "💨", desc: "Obscures tracks behind you." },
+            { id: "obstacle_axe", name: "Axe", emoji: "🪓", desc: "Slices immediate obstacle in lane." },
+            { id: "boomerang", name: "Boomerang", emoji: "🪃", desc: "Collects dots in range ahead." },
+            { id: "ice_spike", name: "Ice Spike", emoji: "🧊", desc: "Shoots forward to freeze obstacle paths." },
+            { id: "spring_glove", name: "Spring Glove", emoji: "🥊", desc: "Repels opponents to neighboring rails." },
+            { id: "mystery_present", name: "Mystery Present", emoji: "🎁", desc: "Gives a high-speed double booster." },
+            { id: "black_hole", name: "Gravity Void", emoji: "🌌", desc: "Clears all obstacles in view distance." },
+            { id: "clone_mine", name: "Clone Mine", emoji: "🧬", desc: "Drops an unstable replica item box." },
+            { id: "wind_glide", name: "Wind Glide", emoji: "🪁", desc: "Decreased gravity & floaty jumps." },
+            { id: "strawberry_zap", name: "Strawberry Zap", emoji: "🍓", desc: "Shoots rapid strawberry projectiles." },
+            { id: "melon_bounce", name: "Melon Bounce", emoji: "🍈", desc: "Bounces over track obstacles automatically." },
+            
+            // --- 22 NEW UNIQUE POWER-UPS ---
+            { id: "magnet_sphere", name: "Magnet Sphere", emoji: "🧲", desc: "Sucks in all Pac-Dots within a wide radius." },
+            { id: "portal_jump", name: "Quantum Portal", emoji: "🌀", desc: "Instantly warps forward safely." },
+            { id: "life_drain", name: "Life Siphon", emoji: "🧛", desc: "Heals 1 life & drains closest opponent's shielding." },
+            { id: "gravity_flip", name: "Gravity Inverter", emoji: "↕️", desc: "Flips cart upside down to ride on the ceiling." },
+            { id: "banana_peel", name: "Naner Slip", emoji: "🍌", desc: "Drops a slippery banana peel hazard behind you." },
+            { id: "shield_shatter", name: "Shatter Nova", emoji: "💎", desc: "Emits shockwave that stuns surrounding racers." },
+            { id: "phase_shifter", name: "Phase Shifter", emoji: "🔮", desc: "Swaps positions with the racer directly ahead." },
+            { id: "slow_mo_aura", name: "Temporal Field", emoji: "⏳", desc: "Spawns a slowing time bubble around your cart." },
+            { id: "double_trouble", name: "Double Trouble", emoji: "👥", desc: "Deploys 2 duplicate carts to clear outer tracks." },
+            { id: "bouncing_bullet", name: "Melon Blaster", emoji: "🍉", desc: "Fires a giant bouncing melon shell forward." },
+            { id: "anvil_drop", name: "Anvil Drop", emoji: "🧱", desc: "Crushes the track leader with a massive anvil." },
+            { id: "speed_pad_spawn", name: "Boost Crafter", emoji: "⚡", desc: "Spawns a golden acceleration zone behind." },
+            { id: "pixel_shield", name: "8-Bit Guard", emoji: "👾", desc: "Summons retro orbiters that block all hits." },
+            { id: "phoenix_fire", name: "Phoenix Dash", emoji: "🔥", desc: "Surrounds you with fire to instantly melt obstacles." },
+            { id: "sound_wave", name: "Siren Wail", emoji: "🔊", desc: "Blows obstacles out of all lanes ahead." },
+            { id: "shrink_ray", name: "Shrink Beam", emoji: "🔍", desc: "Shrinks other carts, slowing them down." },
+            { id: "meteor_strike", name: "Starfall", emoji: "☄️", desc: "Summons cosmic meteors on tracks ahead." },
+            { id: "sticky_tar", name: "Tar Bucket", emoji: "🍯", desc: "Coats tracks behind you with sticky slow-down tar." },
+            { id: "electric_trail", name: "Volt Spark", emoji: "🔋", desc: "Electrifies your rails with neon sparks." },
+            { id: "wind_vortex", name: "Gale Force", emoji: "🌬️", desc: "Tailwind pushes cart forward with zero friction." },
+            { id: "rainbow_bridge", name: "Prism Path", emoji: "🌉", desc: "Rides a suspended colorful bridge over obstacles." },
+            { id: "dice_roll", name: "Chaos Dice", emoji: "🎲", desc: "Triggers a random super blessing instantly." }
+        ];
+
+        // Retrieve current upgrade level multiplier
+        function getPowerupLevel(id) {
+            if (!profile.powerupLevels) profile.powerupLevels = {};
+            return profile.powerupLevels[id] || 1;
+        }
+
+        // Return calculated multiplier based on level
+        function getUpgradeMultiplier(id) {
+            const level = getPowerupLevel(id);
+            return 1 + (level - 1) * 0.20; // Each level awards +20% power performance
+        }
+
+        // Calculate custom upgrade cost infinitely
+        function getUpgradeCost(id) {
+            const level = getPowerupLevel(id);
+            return Math.floor(30 + Math.pow(level, 1.6) * 15);
+        }
+
+        // Trigger Achievement Unlock and UI updates
+        function unlockAchievement(id) {
+            if (!profile.achievements) profile.achievements = {};
+            if (profile.achievements[id]) return; // Already unlocked
+
+            profile.achievements[id] = true;
+            saveProfileData();
+
+            const ach = ACHIEVEMENTS.find(a => a.id === id);
+            if (ach) {
+                const pop = document.getElementById('achievement-popup');
+                const popTitle = document.getElementById('achievement-popup-title');
+                popTitle.innerText = ach.title;
+                pop.style.display = 'block';
+                playTone(1000, 'sine', 0.1, 0.2);
+                setTimeout(() => playTone(1400, 'sine', 0.3, 0.2), 120);
+
+                setTimeout(() => {
+                    pop.style.display = 'none';
+                }, 4000);
+            }
+            populateAchievementsUI();
+            updateCopilotSkinDropdown();
+        }
+
+        // Check various achievements conditions
+        function checkCumulativeAchievements() {
+            if (profile.trophies >= 100) unlockAchievement("bronze_legend");
+            if (profile.trophies >= 450) unlockAchievement("gold_standard");
+            if (profile.trophies >= 1000) unlockAchievement("crystal_clear");
+            if (profile.trophies >= 2000) unlockAchievement("grandmaster_flash");
+
+            if (profile.totalDotsCollected >= 50) unlockAchievement("super_pac");
+            if (profile.totalDotsCollected >= 200) unlockAchievement("pac_millionaire");
+
+            if (profile.racesCompleted >= 5) unlockAchievement("waka_forever");
+        }
+
+        // ==========================================
+        // DYNAMIC PROFILE & LEAGUE CALCULATIONS
+        // ==========================================
+        async function loadProfileData() {
+            try {
+                const saved = await getProfile();
+                if (saved) { 
+                    profile = { ...profile, ...saved }; 
+                    if (!profile.achievements) profile.achievements = {};
+                    if (profile.coins === undefined) profile.coins = 100;
+                    if (!profile.powerupLevels) profile.powerupLevels = {};
+                    document.getElementById('player-name').value = profile.name; 
+                    document.getElementById('player-color').value = profile.color; 
+                    if(profile.pic) document.getElementById('preview-pic').src = profile.pic; 
+                }
+            } catch(e) {
+                console.error("Failed to load profile from IndexedDB", e);
+            }
+
+            // Fallback for missing elements
+            if (!profile.achievements) profile.achievements = {};
+            if (!profile.totalDotsCollected) profile.totalDotsCollected = 0;
+            if (!profile.racesCompleted) profile.racesCompleted = 0;
+            if (profile.coins === undefined) profile.coins = 100;
+            if (!profile.powerupLevels) profile.powerupLevels = {};
+
+            // Trigger First steps achievement on profile access
+            unlockAchievement("first_steps");
+
+            updateLeagueAndSkinsUI();
+            populateAchievementsUI();
+        }
+
+        function updateLeagueAndSkinsUI() {
+            const league = getLeagueByTrophies(profile.trophies);
+            const nextIndex = LEAGUES.indexOf(league) + 1;
+            const nextLeague = nextIndex < LEAGUES.length ? LEAGUES[nextIndex] : null;
+
+            document.getElementById('trophy-count').innerText = profile.trophies;
+            document.getElementById('coin-count').innerText = profile.coins;
+            
+            const leagueTitleEl = document.getElementById('league-full-title');
+            leagueTitleEl.innerText = league.name;
+            leagueTitleEl.style.color = league.color;
+
+            const nextUnlockEl = document.getElementById('league-next-unlock');
+            if (nextLeague) {
+                nextUnlockEl.innerText = `Next Rank: ${nextLeague.name} at ${nextLeague.threshold} 🏆`;
+            } else {
+                nextUnlockEl.innerText = "MAX LEAGUE LEVEL ACHIEVED! 👑";
+            }
+
+            updateCopilotSkinDropdown();
+            checkCumulativeAchievements();
+        }
+
+        function updateCopilotSkinDropdown() {
+            const dropdown = document.getElementById('player-copilot');
+            if (!dropdown) return;
+
+            dropdown.innerHTML = "";
+            const currentLeague = getLeagueByTrophies(profile.trophies);
+            const currentLeagueIndex = LEAGUES.indexOf(currentLeague);
+
+            SKINS.forEach(skin => {
+                const skinLeague = LEAGUES.find(l => l.id === skin.league);
+                const skinLeagueIndex = LEAGUES.indexOf(skinLeague);
+                const isUnlocked = currentLeagueIndex >= skinLeagueIndex;
+
+                const opt = document.createElement('option');
+                opt.value = skin.id;
+                
+                if (isUnlocked) {
+                    opt.innerText = `${skin.name} (Unlocked)`;
+                    opt.disabled = false;
+                } else {
+                    opt.innerText = `🔒 ${skin.name} (Unlocks in ${skinLeague.name})`;
+                    opt.disabled = true;
+                }
+
+                if (skin.id === profile.copilotType) {
+                    opt.selected = true;
+                }
+                dropdown.appendChild(opt);
+            });
+        }
+
+        async function saveProfileData() {
+            profile.name = document.getElementById('player-name').value;
+            profile.color = document.getElementById('player-color').value;
+            
+            const dropdown = document.getElementById('player-copilot');
+            if (dropdown && dropdown.value) {
+                profile.copilotType = dropdown.value;
+            }
+
+            try {
+                await saveProfile(profile);
+            } catch(e) {
+                console.error("Failed to save profile into IndexedDB", e);
+            }
+        }
+
+        document.getElementById('file-pic').addEventListener('change', e => { 
+            const r = new FileReader(); 
+            r.onload = ev => { 
+                profile.pic = ev.target.result; 
+                document.getElementById('preview-pic').src = ev.target.result; 
+                saveProfileData();
+            }; 
+            if(e.target.files[0]) r.readAsDataURL(e.target.files[0]); 
+        });
+
+        function populateAchievementsUI() {
+            const container = document.getElementById('achievements-list-container');
+            if (!container) return;
+
+            container.innerHTML = "";
+            ACHIEVEMENTS.forEach(ach => {
+                const unlocked = profile.achievements && profile.achievements[ach.id];
+                const item = document.createElement('div');
+                item.className = `achievement-item ${unlocked ? 'unlocked' : 'locked'}`;
+                
+                item.innerHTML = `
+                    <div>
+                        <div class="achievement-title">${ach.title}</div>
+                        <div class="achievement-desc">${ach.desc}</div>
+                    </div>
+                    <div class="achievement-status" style="color: ${unlocked ? 'var(--neon-green)' : '#888'}">
+                        ${unlocked ? '✅ COMPLETED' : '🔒 LOCKED'}
+                    </div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        // ==========================================
+        // DYNAMIC STORE MANAGEMENT
+        // ==========================================
+        function showShop() {
+            showPanel('panel-shop');
+            renderShopItems();
+        }
+
+        function renderShopItems() {
+            const container = document.getElementById('shop-list-container');
+            document.getElementById('shop-coins').innerText = profile.coins;
+            if (!container) return;
+
+            container.innerHTML = "";
+            POWERUPS.forEach(p => {
+                const lvl = getPowerupLevel(p.id);
+                const cost = getUpgradeCost(p.id);
+                const mult = getUpgradeMultiplier(p.id);
+                const isAffordable = profile.coins >= cost;
+
+                const item = document.createElement('div');
+                item.className = 'shop-item';
+                item.innerHTML = `
+                    <div class="shop-item-details">
+                        <div class="shop-item-name">${p.emoji} ${p.name} <span class="shop-item-level">[Lv. ${lvl}]</span></div>
+                        <div class="shop-item-desc">${p.desc}</div>
+                        <div style="font-size: 0.7rem; color: var(--neon-green)">Effect Power: x${mult.toFixed(2)}</div>
+                    </div>
+                    <div>
+                        <button class="shop-btn" onclick="buyUpgrade('${p.id}')" ${!isAffordable ? 'disabled' : ''}>
+                            🪙 ${cost}
+                        </button>
+                    </div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function buyUpgrade(id) {
+            const cost = getUpgradeCost(id);
+            if (profile.coins >= cost) {
+                profile.coins -= cost;
+                if (!profile.powerupLevels) profile.powerupLevels = {};
+                profile.powerupLevels[id] = (profile.powerupLevels[id] || 1) + 1;
+                SFX.upgrade();
+                saveProfileData();
+                updateLeagueAndSkinsUI();
+                renderShopItems();
+            }
+        }
+
+        // Populate power-ups inside tutorial screen
+        function populateTutorialPowerups() {
+            const list = document.getElementById('tutorial-powerups-list');
+            if (!list) return;
+
+            list.innerHTML = "";
+            POWERUPS.forEach(p => {
+                const li = document.createElement('li');
+                li.style.marginBottom = "5px";
+                li.innerHTML = `${p.emoji} <b>${p.name}:</b> ${p.desc}`;
+                list.appendChild(li);
+            });
+        }
+
+        function showPanel(id) { 
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active-panel')); 
+            document.getElementById(id).classList.add('active-panel'); 
+        }
+
+        // On Load initialization
+        loadProfileData();
+        populateTutorialPowerups();
+
+        // Helper ordinal text logic (e.g. 1st, 2nd, 3rd)
+        function getOrdinal(n) {
+            const s = ["th", "st", "nd", "rd"];
+            const v = n % 100;
+            return n + (s[(v - 20) % 10] || s[v] || s[0]);
+        }
+
+        // ==========================================
+        // P2P NETWORKING (PEERJS)
+        // ==========================================
+        let peer, isHost = false, roomId = "", connections = {}, hostConnection = null;
+        let playersData = {}, trackSeed = 0;
+        let selectedMapId = "caves";
+        let selectedLengthId = "medium"; // Track Length ID
+
+        const LENGTHS = {
+            short: { name: "Short (1000m)", val: 1000 },
+            medium: { name: "Medium (2000m)", val: 2000 },
+            long: { name: "Long (4000m)", val: 4000 },
+            xl: { name: "XL (6000m)", val: 6000 },
+            xxl: { name: "XXL (10000m)", val: 10000 }
+        };
+
+        function initPeer(id, cb) { 
+            peer = new Peer(id); 
+            peer.on('open', cb); 
+            peer.on('error', err => alert("P2P Error: " + err.type)); 
+        }
+
+        function hostGame() {
+            isHost = true;
+            const rawId = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+            roomId = "mineride_" + rawId; 
+            showPanel('panel-lobby');
+            document.getElementById('room-code-display').innerText = rawId;
+            new QRCode(document.getElementById("qrcode"), { text: rawId, width: 128, height: 128 });
+            document.getElementById('map-selection').style.display = 'block';
+            
+            unlockAchievement("rookie_host");
+
+            initPeer(roomId, () => {
+                trackSeed = Math.random();
+                addPlayerToLobby(peer.id, profile);
+                peer.on('connection', conn => {
+                    if(Object.keys(connections).length >= 7) { conn.send({type: 'error'}); setTimeout(()=>conn.close(), 500); return; } // Max 8 players
+                    connections[conn.peer] = conn;
+                    conn.on('data', data => {
+                        if(data.type === 'join') { 
+                            playersData[conn.peer] = { ...data.profile, id: conn.peer, z: 0, x: 0, y: 0, lives: 10, finished: false, rank: null }; 
+                            updateHostLobby(); 
+                        }
+                        else if (data.type === 'updatePos') { 
+                            if(playersData[conn.peer]) { 
+                                playersData[conn.peer].x = data.x; 
+                                playersData[conn.peer].y = data.y; 
+                                playersData[conn.peer].z = data.z; 
+                                if (data.lives !== undefined) playersData[conn.peer].lives = data.lives;
+                                if (data.finished !== undefined) playersData[conn.peer].finished = data.finished;
+                                if (data.rank !== undefined) playersData[conn.peer].rank = data.rank;
+                            } 
+                        }
+                        else if (data.type === 'reachedFinish') {
+                            if (playersData[conn.peer] && !playersData[conn.peer].finished) {
+                                const nextRank = Object.values(playersData).filter(p => p.rank).length + 1;
+                                playersData[conn.peer].finished = true;
+                                playersData[conn.peer].rank = nextRank;
+                                checkEndGameConditions();
+                            }
+                        }
+                        else if (data.type === 'outOfLives') {
+                            if (playersData[conn.peer]) {
+                                playersData[conn.peer].lives = 0;
+                                checkEndGameConditions();
+                            }
+                        }
+                        else if (data.type === 'win') {
+                            if (data.livesExhausted) {
+                                if (playersData[conn.peer]) playersData[conn.peer].lives = 0;
+                            } else {
+                                if (playersData[conn.peer] && !playersData[conn.peer].finished) {
+                                    const nextRank = Object.values(playersData).filter(p => p.rank).length + 1;
+                                    playersData[conn.peer].finished = true;
+                                    playersData[conn.peer].rank = nextRank;
+                                }
+                            }
+                            checkEndGameConditions();
+                        }
+                        else if (data.type === 'laserShoot') { broadcast({ type: 'laserShoot', x: data.x, z: data.z }); triggerLaserBeamVisual(data.x, data.z); }
+                        else if (data.type === 'freeze') { broadcast({ type: 'freeze', sender: conn.peer }); triggerFreezeEffect(conn.peer); }
+                        else if (data.type === 'defeatPlayer') { broadcast({ type: 'defeatPlayer', target: data.target }); if (data.target === peer.id) triggerDefeatEffect(); }
+                        else if (data.type === 'dropBomb') { broadcast({ type: 'dropBomb', x: data.x, z: data.z, isBomb: true }); triggerSpawnObsVisual(data.x, data.z, true); }
+                        else if (data.type === 'dropDecoy') { broadcast({ type: 'dropDecoy', x: data.x, z: data.z, isDecoy: true }); triggerSpawnObsVisual(data.x, data.z, false); }
+                        else if (data.type === 'dropBanana') { broadcast({ type: 'dropBanana', x: data.x, z: data.z }); triggerSpawnBananaVisual(data.x, data.z); }
+                        else if (data.type === 'dropTar') { broadcast({ type: 'dropTar', x: data.x, z: data.z }); triggerSpawnTarVisual(data.x, data.z); }
+                        else if (data.type === 'shatterPulse') { broadcast({ type: 'shatterPulse', sender: conn.peer }); if(conn.peer !== peer.id) triggerShatterEffect(); }
+                    });
+                    conn.on('close', () => { delete connections[conn.peer]; delete playersData[conn.peer]; updateHostLobby(); checkEndGameConditions(); });
+                });
+            });
+        }
+
+        function updateLobbyState() {
+            if(isHost) {
+                selectedMapId = document.getElementById('map-select').value;
+                selectedLengthId = document.getElementById('length-select').value;
+            }
+            updateHostLobby();
+        }
+
+        function updateHostLobby() {
+            document.getElementById('lobby-players').innerHTML = '';
+            for(let id in playersData) addPlayerToLobby(id, playersData[id]);
+            
+            const playerCount = Object.keys(playersData).length;
+            const isRangeValid = (playerCount >= 2 && playerCount <= 8);
+            document.getElementById('btn-start').style.display = isRangeValid ? 'block' : 'none';
+            document.getElementById('lobby-status').innerText = isRangeValid ? `Ready! ${playerCount}/8 racers are in lobby.` : `Waiting for racers (Must be exactly 2-8, current: ${playerCount})...`;
+            
+            broadcast({ type: 'lobbyUpdate', players: playersData, map: selectedMapId, length: selectedLengthId });
+        }
+
+        function joinGame() {
+            const rawId = document.getElementById('join-code').value;
+            if(rawId.length !== 10) return alert("10-digit Room Code required.");
+            roomId = "mineride_" + rawId;
+            showPanel('panel-lobby'); document.getElementById('room-code-display').innerText = rawId; document.getElementById('qrcode').style.display = 'none';
+            document.getElementById('client-map-display').style.display = 'block';
+            document.getElementById('client-length-display').style.display = 'block';
+
+            unlockAchievement("rookie_guest");
+
+            initPeer(null, () => {
+                hostConnection = peer.connect(roomId, { reliable: false });
+                hostConnection.on('open', () => hostConnection.send({ type: 'join', profile: profile }));
+                hostConnection.on('data', data => {
+                    if(data.type === 'lobbyUpdate') {
+                        playersData = data.players; 
+                        selectedMapId = data.map;
+                        selectedLengthId = data.length || "medium";
+                        document.getElementById('client-map-display').innerText = "Map: " + MAPS[selectedMapId].name;
+                        document.getElementById('client-length-display').innerText = "Length: " + LENGTHS[selectedLengthId].name;
+                        document.getElementById('lobby-players').innerHTML = '';
+                        for(let id in playersData) addPlayerToLobby(id, playersData[id]);
+                    } else if (data.type === 'start') { 
+                        trackSeed = data.seed; 
+                        selectedMapId = data.map; 
+                        selectedLengthId = data.length || "medium";
+                        init3DGame(); 
+                    }
+                    else if (data.type === 'gameState') { 
+                        playersData = data.players; 
+                        if (playersData[peer.id] && playersData[peer.id].rank && !localRankDisplayShown) {
+                            localRank = playersData[peer.id].rank;
+                            document.getElementById('finish-rank-text').innerText = getOrdinal(localRank);
+                            document.getElementById('finish-status').style.display = 'block';
+                            localRankDisplayShown = true;
+                        }
+                    }
+                    else if (data.type === 'gameOver') {
+                        isPlaying = false;
+                        stopBGM();
+                        SFX.win();
+                        showEndScreen(data.results);
+                    }
+                    else if (data.type === 'laserShoot') { triggerLaserBeamVisual(data.x, data.z); }
+                    else if (data.type === 'freeze' && data.sender !== peer.id) { triggerFreezeEffect(); }
+                    else if (data.type === 'defeatPlayer' && data.target === peer.id) { triggerDefeatEffect(); }
+                    else if (data.type === 'dropBomb') { triggerSpawnObsVisual(data.x, data.z, true); }
+                    else if (data.type === 'dropDecoy') { triggerSpawnObsVisual(data.x, data.z, false); }
+                    else if (data.type === 'dropBanana') { triggerSpawnBananaVisual(data.x, data.z); }
+                    else if (data.type === 'dropTar') { triggerSpawnTarVisual(data.x, data.z); }
+                    else if (data.type === 'shatterPulse' && data.sender !== peer.id) { triggerShatterEffect(); }
+                });
+            });
+        }
+
+        function addPlayerToLobby(id, pData) {
+            if(!playersData[id]) playersData[id] = { ...pData, id: id, z:0, x:0, y:0, lives: 10, finished: false, rank: null };
+            const li = document.createElement('li');
+            li.innerHTML = `<img src="${pData.pic || 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='}"><span style="color:${pData.color}">${pData.name}</span> <span style="font-size:0.75rem;opacity:0.6;">(Copilot: ${pData.copilotType || 'yellow'})</span>`;
+            document.getElementById('lobby-players').appendChild(li);
+        }
+
+        function broadcast(data) { for(let id in connections) connections[id].send(data); }
+        function startGameHost() { broadcast({ type: 'start', seed: trackSeed, map: selectedMapId, length: selectedLengthId }); init3DGame(); }
+
+        // ==========================================
+        // 3D ENGINE, PROCEDURAL MAPS AND PARTICLES
+        // ==========================================
+        let scene, camera, renderer, myCart;
+        let otherCarts = {}, obstacles = [], itemBoxes = [], pacDots = [], environmentDecorations = [];
+        let isPlaying = false, isCountdown = false;
+        let currentTrackLength = 2000; // Dynamically updated based on selection
+        
+        let lives = 10;
+        let localFinished = false;
+        let localDead = false;
+        let localRank = null;
+        let localRankDisplayShown = false;
+        
+        // Maps Styling
+        const MAPS = {
+            caves: { name: "The Adventure Caves", fog: 0x111111, grid: 0x444444, light: 0xffffff, rail: 0x888888, obs: 0x553311 },
+            geode: { name: "The Geode Mines", fog: 0x1a0033, grid: 0xaa00ff, light: 0x00ffff, rail: 0x8800ff, obs: 0x00ffcc },
+            lava: { name: "The Lava World", fog: 0x330000, grid: 0xff3300, light: 0xffaa00, rail: 0x441111, obs: 0x111111 },
+            neon_city: { name: "Neon City 🌃", fog: 0x02020a, grid: 0x00f3ff, light: 0xff00ea, rail: 0x333344, obs: 0x00f3ff },
+            frozen_peaks: { name: "Frozen Peaks ❄️", fog: 0x0a1520, grid: 0x4fc3f7, light: 0xe0f7fa, rail: 0x80deea, obs: 0x00e5ff },
+            jungle_ruins: { name: "Jungle Ruins 🌿", fog: 0x051d08, grid: 0x2ecc71, light: 0xa2f3a2, rail: 0x8b5a2b, obs: 0x27ae60 },
+            space_station: { name: "Space Station 🚀", fog: 0x010103, grid: 0x3f51b5, light: 0x9c27b0, rail: 0x78909c, obs: 0xe91e63 },
+            crystal_ocean: { name: "Crystal Ocean 🌊", fog: 0x001122, grid: 0x00d2ff, light: 0x00ffaa, rail: 0x005577, obs: 0x00ffd8 },
+            ghost_railway: { name: "Ghost Railway 👻", fog: 0x15121c, grid: 0x9b59b6, light: 0x2ecc71, rail: 0x4a3c5c, obs: 0x9b59b6 },
+            storm_valley: { name: "Storm Valley ⚡", fog: 0x111215, grid: 0xf1c40f, light: 0x95a5a6, rail: 0x34495e, obs: 0xe67e22 },
+            desert_canyon: { name: "Desert Canyon 🏜️", fog: 0x2c1d11, grid: 0xe67e22, light: 0xf39c12, rail: 0x8b4513, obs: 0xd35400 },
+            mushroom_kingdom: { name: "Mushroom Kingdom 🍄", fog: 0x1a250c, grid: 0xff4d4d, light: 0x2ecc71, rail: 0xd35400, obs: 0xff2222 },
+            robot_factory: { name: "Robot Factory 🤖", fog: 0x0f0f14, grid: 0x95a5a6, light: 0xe74c3c, rail: 0x7f8c8d, obs: 0x34495e },
+            volcano_core: { name: "Volcano Core 🌋", fog: 0x220500, grid: 0xff3300, light: 0xffaa00, rail: 0x441111, obs: 0xff5500 },
+            rainbow_dimension: { name: "Rainbow Dimension 🌈", fog: 0x1c0024, grid: 0xff00ea, light: 0x00f3ff, rail: 0x3a0050, obs: 0xffff00 },
+            retro_arcade: { name: "Retro Arcade 🕹️", fog: 0x000000, grid: 0x00ff00, light: 0xff00ff, rail: 0x111111, obs: 0x00ffff }
+        };
+
+        // Physics Configurations & 4 Lanes
+        let input = { jump: false, speedUp: false, speedDown: false };
+        const LANES = [-2.25, -0.75, 0.75, 2.25]; 
+        let currentLaneIdx = 1; 
+        let speed = 1.5; let maxSpeed = 3.5;
+        let velocityY = 0; let isGrounded = true;
+        
+        let myItem = null;
+        
+        // Multi-tier Status Effects Timeline tracking
+        let effects = { 
+            powerPelletTime: 0, 
+            freezeTime: 0,
+            spinTime: 0,
+            sadTime: 0,
+            happyTime: 0,
+
+            // New Status variables
+            shieldBarrier: 0,     // protective block count
+            ghostCloakTime: 0,    // intangible state
+            giantPacTime: 0,      // trample power
+            spicyChiliTime: 0,    // insane sliding speed
+            bubbleFloatTime: 0,   // float above track
+            windGlideTime: 0,     // low gravity jumps
+            autopilotCount: 0,    // automatic lane switches left
+            rapidZapTime: 0,      // shoot continuous projectiles
+
+            // Timers for 22 unique powerups
+            magnetTime: 0,
+            gravityFlipTime: 0,
+            slowMoFieldTime: 0,
+            phoenixFireTime: 0,
+            electricTrailTime: 0,
+            windVortexTime: 0,
+            rainbowBridgeTime: 0,
+            stickyTarTime: 0,
+            shrinkTime: 0,
+            speedPadTime: 0,
+            pixelShieldCount: 0
+        };
+
+        let dotCount = 0;
+        let isDashing = false;
+        let dashDuration = 1.2;
+        let dashTimeRemaining = 0;
+
+        // Custom Optimized Particle System & Reusable Object Pools
+        let particles = [];
+        let ambientWeatherParticles = [];
+        const particleGeometry = new THREE.BoxGeometry(1, 1, 1);
+        const particleMaterials = {};
+
+        function getParticleMaterial(colorHex) {
+            if (!particleMaterials[colorHex]) {
+                particleMaterials[colorHex] = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.9 });
+            }
+            return particleMaterials[colorHex];
+        }
+
+        function createParticleBurst(position, colorHex, count = 20, size = 0.2) {
+            const mat = getParticleMaterial(colorHex);
+            for (let i = 0; i < count; i++) {
+                const p = new THREE.Mesh(particleGeometry, mat);
+                p.position.copy(position);
+                p.position.x += (Math.random() - 0.5) * 0.5;
+                p.position.y += (Math.random() - 0.5) * 0.5;
+                p.position.z += (Math.random() - 0.5) * 0.5;
+                p.scale.set(size, size, size);
+                scene.add(p);
+                particles.push({
+                    mesh: p,
+                    velocity: new THREE.Vector3(
+                        (Math.random() - 0.5) * 0.18,
+                        (Math.random()) * 0.18,
+                        (Math.random() - 0.5) * 0.18
+                    ),
+                    life: 1.0,
+                    decay: 0.02 + Math.random() * 0.03,
+                    initialSize: size
+                });
+            }
+        }
+
+        // Global Pre-Allocated Temporary Variables to Prevent Garbage Collection
+        const tempMyBox = new THREE.Box3();
+        const tempVec3 = new THREE.Vector3();
+        const tempCamTarget = new THREE.Vector3();
+        let animationFrameId = null;
+        let gameIntervalId = null;
+
+        function triggerRaceCountdown() {
+            isCountdown = true;
+            const overlay = document.getElementById('countdown-overlay');
+            const textEl = document.getElementById('countdown-text');
+            overlay.style.display = 'flex';
+            
+            let count = 3;
+            textEl.innerText = count;
+            playTone(450, 'sine', 0.2, 0.15);
+
+            unlockAchievement("first_race");
+
+            const countdownInterval = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    textEl.innerText = count;
+                    playTone(450, 'sine', 0.2, 0.15);
+                } else if (count === 0) {
+                    textEl.innerText = "READY?";
+                    playTone(450, 'sine', 0.2, 0.15);
+                } else if (count === -1) {
+                    textEl.innerText = "GO!";
+                    playTone(900, 'sine', 0.4, 0.2);
+                    isCountdown = false;
+                    speed = 1.5; 
+                    startBGM(); 
+                } else {
+                    clearInterval(countdownInterval);
+                    overlay.style.display = 'none';
+                }
+            }, 1000);
+        }
+
+        function createGhostObstacleMesh(colorHex) {
+            const group = new THREE.Group();
+            const bodyMat = new THREE.MeshStandardMaterial({ 
+                color: colorHex, 
+                roughness: 0.2, 
+                metalness: 0.1 
+            });
+            
+            const cylGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.7, 16);
+            const cyl = new THREE.Mesh(cylGeo, bodyMat);
+            cyl.position.y = 0.35;
+            group.add(cyl);
+            
+            const headGeo = new THREE.SphereGeometry(0.5, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const head = new THREE.Mesh(headGeo, bodyMat);
+            head.position.y = 0.7;
+            group.add(head);
+            
+            const eyesGroup = new THREE.Group();
+            const eGeo = new THREE.SphereGeometry(0.12, 8, 8);
+            const pGeo = new THREE.SphereGeometry(0.05, 8, 8);
+            const eMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const pMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            
+            const lE = new THREE.Mesh(eGeo, eMat); lE.position.set(0.18, 0.7, 0.42);
+            const lP = new THREE.Mesh(pGeo, pMat); lP.position.set(0.18, 0.7, 0.52);
+            
+            const rE = new THREE.Mesh(eGeo, eMat); rE.position.set(-0.18, 0.7, 0.42);
+            const rP = new THREE.Mesh(pGeo, pMat); rP.position.set(-0.18, 0.7, 0.52);
+            
+            eyesGroup.add(lE, lP, rE, rP);
+            group.add(eyesGroup);
+            group.scale.set(1.1, 1.1, 1.1);
+            return group;
+        }
+
+        // Cherry bomb visual spawn or decoy cart visual spawn on the rails dynamically
+        function triggerSpawnObsVisual(x, z, isBomb) {
+            let obsMesh;
+            if (isBomb) {
+                // Shiny Cherry obstacle
+                const group = new THREE.Group();
+                const cherryMat = new THREE.MeshStandardMaterial({ color: 0xd63031, roughness: 0.1 });
+                const stemMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71 });
+                const cherry = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12), cherryMat);
+                cherry.position.y = 0.35;
+                const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5), stemMat);
+                stem.position.set(0.1, 0.65, 0);
+                stem.rotation.z = 0.3;
+                group.add(cherry, stem);
+                obsMesh = group;
+            } else {
+                // Decoy crate obstacle
+                const crateGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+                const crateMat = new THREE.MeshStandardMaterial({ color: 0xd35400, roughness: 0.8 });
+                obsMesh = new THREE.Mesh(crateGeo, crateMat);
+                obsMesh.position.y = 0.4;
+            }
+            obsMesh.position.set(x, obsMesh.position.y, z);
+            scene.add(obsMesh);
+
+            const box = new THREE.Box3(
+                new THREE.Vector3(x - 0.5, -0.1, z - 0.5),
+                new THREE.Vector3(x + 0.5, 1.0, z + 0.5)
+            );
+            obstacles.push({ box: box, mesh: obsMesh, isBomb: isBomb, isBanana: false, isAnvil: false, isTar: false });
+            createParticleBurst(obsMesh.position, isBomb ? 0xd63031 : 0xd35400, 10, 0.15);
+        }
+
+        // ==========================================
+        // DECORATIVE HAZARDS / SPAWNS 
+        // ==========================================
+        function triggerSpawnBananaVisual(x, z) {
+            // Shiny Yellow Banana peel model
+            const group = new THREE.Group();
+            const peelMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.2 });
+            for(let i=0; i<3; i++) {
+                const petal = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.15, 0.4, 8), peelMat);
+                petal.position.set(Math.sin(i*2)*0.15, 0.1, Math.cos(i*2)*0.15);
+                petal.rotation.z = 0.5;
+                petal.rotation.y = i * 2;
+                group.add(petal);
+            }
+            group.position.set(x, 0.05, z);
+            scene.add(group);
+
+            const box = new THREE.Box3(
+                new THREE.Vector3(x - 0.4, -0.1, z - 0.4),
+                new THREE.Vector3(x + 0.4, 0.5, z + 0.4)
+            );
+            obstacles.push({ box: box, mesh: group, isBomb: false, isBanana: true, isAnvil: false, isTar: false });
+            createParticleBurst(group.position, 0xffd700, 10, 0.15);
+        }
+
+        function triggerSpawnTarVisual(x, z) {
+            // Sticky black Tar puddle
+            const geo = new THREE.CylinderGeometry(0.6, 0.6, 0.05, 16);
+            const mat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.95 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, -0.38, z);
+            scene.add(mesh);
+
+            const box = new THREE.Box3(
+                new THREE.Vector3(x - 0.6, -0.5, z - 0.6),
+                new THREE.Vector3(x + 0.6, 0.2, z + 0.6)
+            );
+            obstacles.push({ box: box, mesh: mesh, isBomb: false, isBanana: false, isAnvil: false, isTar: true });
+            createParticleBurst(mesh.position, 0x111111, 8, 0.2);
+        }
+
+        function triggerSpawnAnvilVisual(x, z) {
+            // Heavy metallic block that falls down
+            const group = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.5, metalness: 0.9 });
+            const top = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 1.2), mat);
+            const bot = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.4, 0.8), mat);
+            bot.position.y = -0.4;
+            group.add(top, bot);
+            group.position.set(x, 6.0, z); // Starts high in sky!
+            scene.add(group);
+
+            const box = new THREE.Box3(
+                new THREE.Vector3(x - 0.5, -0.5, z - 0.6),
+                new THREE.Vector3(x + 0.5, 6.5, z + 0.6)
+            );
+            
+            const anvilObj = { box: box, mesh: group, isBomb: false, isBanana: false, isAnvil: true, isTar: false, targetY: 0.2, gravityVel: 0 };
+            obstacles.push(anvilObj);
+            createParticleBurst(group.position, 0x2c3e50, 15, 0.2);
+        }
+
+        function triggerShatterEffect() {
+            effects.spinTime = 1.0;
+            effects.shieldBarrier = 0;
+            updateStatusHUDEffects();
+            SFX.crash();
+            createParticleBurst(myCart.position, 0x00f3ff, 25, 0.25);
+        }
+
+        // ==========================================
+        // NEW SUPER STYLED ENVIRONMENT PROCEDURAL DECORATIONS
+        // ==========================================
+        function createStyledDecoration(mapId, side, z) {
+            const group = new THREE.Group();
+            const posX = side * 4.5;
+            
+            switch (mapId) {
+                case "mushroom_kingdom":
+                    // Red fly agaric mushroom decoration
+                    const stalkGeo = new THREE.CylinderGeometry(0.12, 0.16, 0.9, 10);
+                    const stalkMat = new THREE.MeshStandardMaterial({ color: 0xf5f5dc, roughness: 0.6 });
+                    const stalk = new THREE.Mesh(stalkGeo, stalkMat);
+                    stalk.position.y = 0.45;
+                    group.add(stalk);
+                    
+                    const capGeo = new THREE.SphereGeometry(0.42, 16, 12, 0, Math.PI*2, 0, Math.PI/2);
+                    const capMat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.2 });
+                    const cap = new THREE.Mesh(capGeo, capMat);
+                    cap.position.y = 0.8;
+                    group.add(cap);
+
+                    // Tiny white dots on mushroom cap
+                    for (let d = 0; d < 5; d++) {
+                        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+                        dot.position.set(Math.sin(d)*0.32, 1.05, Math.cos(d)*0.32);
+                        group.add(dot);
+                    }
+                    break;
+                case "geode":
+                    // Shimmering Crystal Prism structures
+                    const crystalGeo = new THREE.ConeGeometry(0.24, 1.1, 5);
+                    const crystalMat = new THREE.MeshStandardMaterial({ color: 0xaa00ff, emissive: 0x5500aa, roughness: 0.1, transparent: true, opacity: 0.85 });
+                    const crystal1 = new THREE.Mesh(crystalGeo, crystalMat);
+                    crystal1.position.y = 0.55;
+                    crystal1.rotation.z = side * 0.25;
+                    crystal1.rotation.y = Math.random();
+                    group.add(crystal1);
+                    break;
+                case "lava":
+                case "volcano_core":
+                    // Volcanic vents emitting glowing red core elements
+                    const ventGeo = new THREE.CylinderGeometry(0.3, 0.45, 0.8, 10);
+                    const ventMat = new THREE.MeshStandardMaterial({ color: 0x1f1512, roughness: 0.95 });
+                    const vent = new THREE.Mesh(ventGeo, ventMat);
+                    vent.position.y = 0.4;
+                    group.add(vent);
+
+                    const lavaCore = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), new THREE.MeshBasicMaterial({ color: 0xff3300 }));
+                    lavaCore.position.set(0, 0.8, 0);
+                    group.add(lavaCore);
+                    break;
+                case "neon_city":
+                    // Glowing futuristic holographic high-rises
+                    const buildingMat = new THREE.MeshStandardMaterial({ color: 0x050515, metalness: 0.9, roughness: 0.1 });
+                    const building = new THREE.Mesh(new THREE.BoxGeometry(0.9, 4.0, 0.9), buildingMat);
+                    building.position.y = 2.0;
+                    group.add(building);
+
+                    const glassStrip = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.8, 0.95), new THREE.MeshBasicMaterial({ color: 0x00f3ff }));
+                    glassStrip.position.set(side * 0.46, 2.0, 0);
+                    group.add(glassStrip);
+                    break;
+                case "frozen_peaks":
+                    // Fluffy snowy peak structures and ice needles
+                    const snowHill = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.5, 12), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }));
+                    snowHill.position.y = 0.75;
+                    group.add(snowHill);
+
+                    const iceNeedle = new THREE.Mesh(new THREE.CylinderGeometry(0, 0.1, 1.0, 8), new THREE.MeshStandardMaterial({ color: 0x00ffd8, transparent: true, opacity: 0.7 }));
+                    iceNeedle.position.set(side * -0.5, 0.5, 0.2);
+                    iceNeedle.rotation.x = 0.25;
+                    group.add(iceNeedle);
+                    break;
+                case "jungle_ruins":
+                    // Green leafy ancient ruin columns
+                    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 1.6, 12), new THREE.MeshStandardMaterial({ color: 0x4a4a42, roughness: 0.9 }));
+                    pillar.position.y = 0.8;
+                    group.add(pillar);
+
+                    const bushCap = new THREE.Mesh(new THREE.SphereGeometry(0.45, 12, 12), new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.85 }));
+                    bushCap.position.set(0, 1.6, 0);
+                    group.add(bushCap);
+                    break;
+                case "space_station":
+                    // Scientific satellites and floating panels
+                    const stationBeam = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.2), new THREE.MeshStandardMaterial({ color: 0xaaaaaa }));
+                    stationBeam.position.y = 1.0;
+                    group.add(stationBeam);
+
+                    const solarMat = new THREE.MeshStandardMaterial({ color: 0x103a75, roughness: 0.1, metalness: 0.8 });
+                    const solarWing1 = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.04, 0.35), solarMat);
+                    solarWing1.position.set(0.48, 1.5, 0);
+                    const solarWing2 = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.04, 0.35), solarMat);
+                    solarWing2.position.set(-0.48, 1.5, 0);
+                    group.add(solarWing1, solarWing2);
+                    break;
+                case "crystal_ocean":
+                    // Branched sea anemone coral columns
+                    const baseCoral = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.22, 1.1), new THREE.MeshStandardMaterial({ color: 0xe040fb, roughness: 0.4 }));
+                    baseCoral.position.y = 0.55;
+                    group.add(baseCoral);
+
+                    for (let b = 0; b < 3; b++) {
+                        const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.45), new THREE.MeshStandardMaterial({ color: 0x00ffaa }));
+                        branch.position.set(Math.sin(b)*0.18, 0.9, Math.cos(b)*0.18);
+                        branch.rotation.z = Math.sin(b)*0.5;
+                        group.add(branch);
+                    }
+                    break;
+                case "ghost_railway":
+                    // Dark Gothic Gravestones with moss
+                    const tombstone = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.8, 0.15), new THREE.MeshStandardMaterial({ color: 0x3d3d3d, roughness: 0.9 }));
+                    tombstone.position.set(0, 0.4, 0);
+                    group.add(tombstone);
+                    
+                    const headCross = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.08), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                    headCross.position.set(0, 0.9, 0);
+                    const crossbar = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.08), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                    crossbar.position.set(0, 0.9, 0);
+                    group.add(headCross, crossbar);
+                    break;
+                case "storm_valley":
+                    // Heavy metal lightning rod towers
+                    const steelBeam = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.8, 0.12), new THREE.MeshStandardMaterial({ color: 0x55555c, metalness: 0.9 }));
+                    steelBeam.position.y = 0.9;
+                    group.add(steelBeam);
+
+                    const rodProng = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.4, 4), new THREE.MeshStandardMaterial({ color: 0xffd700 }));
+                    rodProng.position.set(0, 1.9, 0);
+                    group.add(rodProng);
+                    break;
+                case "desert_canyon":
+                    // Saguaro Cactus models
+                    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.4, 8), new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.9 }));
+                    trunk.position.y = 0.7;
+                    group.add(trunk);
+
+                    const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.4), new THREE.MeshStandardMaterial({ color: 0x27ae60 }));
+                    leftArm.position.set(-0.25, 0.8, 0);
+                    leftArm.rotation.z = Math.PI / 2;
+                    const leftArmUp = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.45), new THREE.MeshStandardMaterial({ color: 0x27ae60 }));
+                    leftArmUp.position.set(-0.45, 1.0, 0);
+                    group.add(leftArm, leftArmUp);
+                    break;
+                case "robot_factory":
+                    // Mechanical columns with rotating gears
+                    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 1.5, 10), new THREE.MeshStandardMaterial({ color: 0x7f8c8d, metalness: 0.95 }));
+                    col.position.y = 0.75;
+                    group.add(col);
+
+                    const gear = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.08, 12), new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8 }));
+                    gear.position.set(0, 1.1, 0);
+                    group.add(gear);
+                    group.userData = { gear: gear, rotSpeed: side * 0.04 };
+                    break;
+                case "rainbow_dimension":
+                    // Beautiful rotating floating neon stars
+                    const star1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), new THREE.MeshBasicMaterial({ color: 0xff00ea }));
+                    const star2 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), new THREE.MeshBasicMaterial({ color: 0x00f3ff }));
+                    star1.position.y = 0.75;
+                    star2.position.set(0, 0.75, 0);
+                    star2.rotation.y = Math.PI / 4;
+                    star2.rotation.z = Math.PI / 4;
+                    group.add(star1, star2);
+                    group.userData = { stars: [star1, star2] };
+                    break;
+                case "retro_arcade":
+                    // Pixel arcade box invaders
+                    const invaderMat = new THREE.MeshBasicMaterial({ color: 0x39ff14 });
+                    const coreInvader = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.15), invaderMat);
+                    coreInvader.position.y = 0.75;
+                    const rEye = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.16), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+                    rEye.position.set(0.12, 0.8, 0.06);
+                    const lEye = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.16), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+                    lEye.position.set(-0.12, 0.8, 0.06);
+                    group.add(coreInvader, rEye, lEye);
+                    break;
+                case "caves":
+                default:
+                    // Simple rugged cone stone pillars
+                    const caveCone = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.3, 8), new THREE.MeshStandardMaterial({ color: 0x4a3b32, roughness: 0.95 }));
+                    caveCone.position.y = 0.65;
+                    group.add(caveCone);
+                    break;
+            }
+
+            group.position.set(posX, 0, z);
+            scene.add(group);
+            environmentDecorations.push(group);
+        }
+
+        // Clean arrays to release WebGL context gracefully
+        function cleanup3DGame() {
+            isPlaying = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            if (gameIntervalId) {
+                clearInterval(gameIntervalId);
+                gameIntervalId = null;
+            }
+            stopBGM();
+
+            if (scene) {
+                scene.traverse(object => {
+                    if (object.isMesh) {
+                        if (object.geometry) object.geometry.dispose();
+                        if (object.material) {
+                            if (Array.isArray(object.material)) {
+                                object.material.forEach(mat => mat.dispose());
+                            } else {
+                                object.material.dispose();
+                            }
+                        }
+                    }
+                });
+                while(scene.children.length > 0) {
+                    scene.remove(scene.children[0]);
+                }
+            }
+
+            if (renderer) {
+                renderer.dispose();
+                if (renderer.domElement && renderer.domElement.parentNode) {
+                    renderer.domElement.parentNode.removeChild(renderer.domElement);
+                }
+                renderer = null;
+            }
+
+            // Cleanup arrays to release memory
+            obstacles = [];
+            itemBoxes = [];
+            pacDots = [];
+            particles = [];
+            ambientWeatherParticles = [];
+            environmentDecorations = [];
+            otherCarts = {};
+            
+            dotCount = 0;
+            isDashing = false;
+            myItem = null;
+            document.getElementById('item-emoji-hud').innerText = "❓";
+            document.getElementById('item-name-hud').innerText = "NO ITEM";
+            updateDashBarUI();
+        }
+
+        function leaveLobby() {
+            cleanup3DGame();
+            if (peer) {
+                peer.destroy();
+                peer = null;
+            }
+            connections = {};
+            hostConnection = null;
+            window.location.reload();
+        }
+
+        function init3DGame() {
+            // Guarantee WebGL context is pristine before instantiating new resources
+            cleanup3DGame();
+
+            document.getElementById('ui-layer').style.display = 'none';
+            document.getElementById('game-overlay').style.display = 'block';
+            
+            lives = 10;
+            localFinished = false;
+            localDead = false;
+            localRank = null;
+            localRankDisplayShown = false;
+            document.getElementById('lives-count').innerText = lives;
+            document.getElementById('finish-status').style.display = 'none';
+
+            // Reset dynamic map length config
+            currentTrackLength = LENGTHS[selectedLengthId] ? LENGTHS[selectedLengthId].val : 2000;
+
+            // Reset custom status durations
+            effects = { 
+                powerPelletTime: 0, freezeTime: 0, spinTime: 0, sadTime: 0, happyTime: 0,
+                shieldBarrier: 0, ghostCloakTime: 0, giantPacTime: 0, spicyChiliTime: 0,
+                bubbleFloatTime: 0, windGlideTime: 0, autopilotCount: 0, rapidZapTime: 0,
+                magnetTime: 0, gravityFlipTime: 0, slowMoFieldTime: 0, phoenixFireTime: 0,
+                electricTrailTime: 0, windVortexTime: 0, rainbowBridgeTime: 0, stickyTarTime: 0,
+                shrinkTime: 0, speedPadTime: 0, pixelShieldCount: 0
+            };
+            document.getElementById('status-effects-hud').style.display = 'none';
+
+            const m = MAPS[selectedMapId];
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(m.fog, 0.005);
+            scene.background = new THREE.Color(m.fog);
+            
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 500);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            const ambient = new THREE.AmbientLight(0x404040, 1.5); scene.add(ambient);
+            const dirLight = new THREE.DirectionalLight(m.light, 1); dirLight.position.set(10, 20, 10); scene.add(dirLight);
+
+            const grid = new THREE.GridHelper(200, 100, m.grid, m.fog); grid.position.y = -0.5; scene.add(grid);
+
+            const railGeo = new THREE.BoxGeometry(0.3, 0.2, currentTrackLength + 100);
+            const railMat = new THREE.MeshStandardMaterial({ color: m.rail, roughness: 0.4 });
+            LANES.forEach(lx => {
+                const r = new THREE.Mesh(railGeo, railMat); r.position.set(lx, -0.4, -currentTrackLength/2); scene.add(r);
+            });
+
+            // Math seedrandom loaded via script for matching seed tracks
+            const random = new Math.seedrandom(trackSeed);
+            
+            // Build the Styled Environment decorations
+            for (let decZ = 20; decZ < currentTrackLength - 10; decZ += 24) {
+                createStyledDecoration(selectedMapId, -1, -decZ);
+                createStyledDecoration(selectedMapId, 1, -decZ);
+            }
+
+            // Yellow Finish line arch at the end
+            const archGroup = new THREE.Group();
+            const archMat = new THREE.MeshStandardMaterial({ color: 0xffff00, roughness: 0.1, metalness: 0.8 });
+            const leftPost = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 4.0), archMat);
+            leftPost.position.set(-3.5, 1.5, -currentTrackLength);
+            const rightPost = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 4.0), archMat);
+            rightPost.position.set(3.5, 1.5, -currentTrackLength);
+            const crossbar = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.3, 0.3), archMat);
+            crossbar.position.set(0, 3.5, -currentTrackLength);
+            archGroup.add(leftPost, rightPost, crossbar);
+            scene.add(archGroup);
+            
+            for(let i = 30; i < currentTrackLength - 50; i += 25) {
+                const rnd = random();
+                const laneX = LANES[Math.floor(random() * 4)];
+                
+                if(rnd > 0.45) { 
+                    if(rnd > 0.80) { 
+                        const pellet = createRainbowPelletMesh();
+                        pellet.position.set(laneX, 0.5, -i);
+                        scene.add(pellet);
+                        
+                        // Construct direct algebraic AABB to avoid heavy traverse calls
+                        const box = new THREE.Box3(
+                            new THREE.Vector3(laneX - 0.55, -0.05, -i - 0.55),
+                            new THREE.Vector3(laneX + 0.55, 1.05, -i + 0.55)
+                        );
+                        itemBoxes.push({ box: box, mesh: pellet, active: true });
+                    } else { 
+                        const ghostColor = GHOST_COLORS[Math.floor(random() * GHOST_COLORS.length)];
+                        const obs = createGhostObstacleMesh(ghostColor);
+                        obs.position.set(laneX, -0.1, -i);
+                        scene.add(obs);
+                        
+                        const box = new THREE.Box3(
+                            new THREE.Vector3(laneX - 0.55, -0.1, -i - 0.55),
+                            new THREE.Vector3(laneX + 0.55, 1.0, -i + 0.55)
+                        );
+                        obstacles.push({ box: box, mesh: obs, isBomb: false, isBanana: false, isAnvil: false, isTar: false });
+                    }
+                }
+            }
+
+            for(let i = 15; i < currentTrackLength - 10; i += 12) {
+                const randomLane = LANES[Math.floor(random() * 4)];
+                const tooCloseObstacle = obstacles.some(o => Math.abs(o.mesh.position.z - (-i)) < 3 && Math.abs(o.mesh.position.x - randomLane) < 0.2);
+                const tooCloseItem = itemBoxes.some(ib => Math.abs(ib.mesh.position.z - (-i)) < 3 && Math.abs(ib.mesh.position.x - randomLane) < 0.2);
+                
+                if (!tooCloseObstacle && !tooCloseItem) {
+                    const dotGeo = new THREE.SphereGeometry(0.18, 12, 12);
+                    const dotMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+                    const dot = new THREE.Mesh(dotGeo, dotMat);
+                    dot.position.set(randomLane, 0.2, -i);
+                    scene.add(dot);
+                    
+                    const box = new THREE.Box3(
+                        new THREE.Vector3(randomLane - 0.18, 0.02, -i - 0.18),
+                        new THREE.Vector3(randomLane + 0.18, 0.38, -i + 0.18)
+                    );
+                    pacDots.push({ mesh: dot, box: box, active: true });
+                }
+            }
+
+            playersData[peer.id] = { ...profile, id: peer.id, z: 0, x: 0, y: 0, lives: 10, finished: false, rank: null };
+
+            myCart = createCartMesh(profile.color, profile.copilotType || "yellow"); scene.add(myCart);
+            for(let id in playersData) { 
+                if(id !== peer.id) { 
+                    let c = createCartMesh(playersData[id].color, playersData[id].copilotType || "yellow"); 
+                    otherCarts[id] = c; 
+                    scene.add(c); 
+                } 
+            }
+
+            setupControls(); 
+            isPlaying = true; 
+            triggerRaceCountdown();
+            animate();
+            
+            if(isHost) {
+                gameIntervalId = setInterval(hostBroadcastLoop, 50);
+            } else {
+                gameIntervalId = setInterval(clientSendLoop, 50);
+            }
+        }
+
+        function createRainbowPelletMesh() {
+            const group = new THREE.Group();
+            const coreGeo = new THREE.SphereGeometry(0.35, 16, 16);
+            const coreMat = new THREE.MeshStandardMaterial({ roughness: 0.1, metalness: 0.2 });
+            const core = new THREE.Mesh(coreGeo, coreMat);
+            group.add(core);
+            
+            const ringGeo = new THREE.TorusGeometry(0.55, 0.05, 8, 24);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = Math.PI / 2;
+            group.add(ring);
+            
+            group.userData = { coreMat: coreMat, ringMat: ringMat };
+            return group;
+        }
+
+        function createPacmanCopilot(copilotType = "yellow") {
+            const copilot = new THREE.Group();
+            let hexColor = 0xffff00; 
+            let customEmissive = 0x000000;
+
+            // Match dynamic skin properties and colors mapping beautifully
+            const matchedSkin = SKINS.find(s => s.id === copilotType);
+            if (matchedSkin) {
+                hexColor = matchedSkin.color;
+            }
+
+            // Custom skin behaviors
+            if (copilotType === "shadow") hexColor = 0x222222;
+            if (copilotType === "neon_pink") { hexColor = 0xff00ea; customEmissive = 0xff00ea; }
+            if (copilotType === "matrix") { hexColor = 0x111111; customEmissive = 0x39ff14; }
+
+            const pmMaterial = new THREE.MeshPhongMaterial({ 
+                color: hexColor, 
+                side: THREE.DoubleSide,
+                emissive: customEmissive,
+                shininess: (copilotType === "diamond" || copilotType === "gold") ? 100 : 30
+            });
+            
+            const topGeo = new THREE.SphereGeometry(0.35, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const topHalf = new THREE.Mesh(topGeo, pmMaterial);
+            const bottomGeo = new THREE.SphereGeometry(0.35, 32, 16, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+            const bottomHalf = new THREE.Mesh(bottomGeo, pmMaterial);
+
+            const eyeGeo = new THREE.SphereGeometry(0.06, 16, 16);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const rightEye = new THREE.Mesh(eyeGeo, eyeMat); rightEye.position.set(0.15, 0.18, 0.25);
+            const leftEye = new THREE.Mesh(eyeGeo, eyeMat); leftEye.position.set(-0.15, 0.18, 0.25);
+            
+            topHalf.add(rightEye); topHalf.add(leftEye);
+            copilot.add(topHalf); copilot.add(bottomHalf);
+            
+            copilot.position.set(0, 0.75, 0.35);
+            return {
+                mesh: copilot,
+                topHalf: topHalf,
+                bottomHalf: bottomHalf,
+                leftEye: leftEye,
+                rightEye: rightEye,
+                pmMaterial: pmMaterial,
+                eyeMat: eyeMat,
+                copilotType: copilotType
+            };
+        }
+
+        function createCartMesh(hexColor, copilotType = "yellow") {
+            const group = new THREE.Group();
+            const bodyMat = new THREE.MeshStandardMaterial({ 
+                color: hexColor, 
+                roughness: 0.15, 
+                metalness: 0.7,
+                transparent: true,
+                opacity: 1.0
+            });
+            
+            const frameGeo = new THREE.BoxGeometry(1.2, 0.6, 1.8);
+            const mainBody = new THREE.Mesh(frameGeo, bodyMat);
+            mainBody.position.y = 0.35;
+            group.add(mainBody);
+            
+            const sideRimMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.9, roughness: 0.1 });
+            const leftRim = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 1.9), sideRimMat);
+            leftRim.position.set(-0.62, 0.35, 0);
+            group.add(leftRim);
+            
+            const rightRim = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 1.9), sideRimMat);
+            rightRim.position.set(0.62, 0.35, 0);
+            group.add(rightRim);
+
+            const lampGeo = new THREE.SphereGeometry(0.15, 12, 12);
+            const lampMat = new THREE.MeshBasicMaterial({ color: 0xfffca1 });
+            const lamp = new THREE.Mesh(lampGeo, lampMat);
+            lamp.position.set(0, 0.45, -0.92);
+            group.add(lamp);
+
+            const wheelGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.12, 16);
+            wheelGeo.rotateZ(Math.PI / 2); 
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1f1f1f, roughness: 0.8 });
+            
+            const offsets = [
+                [-0.6, 0.08, -0.5], 
+                [0.6, 0.08, -0.5],  
+                [-0.6, 0.08, 0.5],  
+                [0.6, 0.08, 0.5]    
+            ];
+            
+            const wheels = [];
+            offsets.forEach(pos => {
+                const w = new THREE.Mesh(wheelGeo, wheelMat);
+                w.position.set(pos[0], pos[1], pos[2]);
+                group.add(w);
+                wheels.push(w);
+            });
+            
+            const copilotData = createPacmanCopilot(copilotType);
+            group.add(copilotData.mesh);
+            
+            group.userData = { wheels: wheels, hexColor: hexColor, copilot: copilotData };
+            return group;
+        }
+
+        // ==========================================
+        // GAMEPLAY TICKS AND NET ACTIONS
+        // ==========================================
+        function hostBroadcastLoop() {
+            if(!isPlaying) return;
+            playersData[peer.id].x = myCart.position.x; 
+            playersData[peer.id].y = myCart.position.y; 
+            playersData[peer.id].z = myCart.position.z;
+            playersData[peer.id].lives = lives;
+            playersData[peer.id].finished = localFinished;
+            playersData[peer.id].rank = localRank;
+
+            // STRIP BASE64 PHOTO PAYLOADS FROM CONTINUOUS GAME-LOOP TRANSMISSIONS
+            const lightweightPlayers = {};
+            for (let id in playersData) {
+                const p = playersData[id];
+                lightweightPlayers[id] = {
+                    id: p.id,
+                    name: p.name,
+                    color: p.color,
+                    copilotType: p.copilotType,
+                    x: p.x,
+                    y: p.y,
+                    z: p.z,
+                    lives: p.lives,
+                    finished: p.finished,
+                    rank: p.rank
+                };
+            }
+            broadcast({ type: 'gameState', players: lightweightPlayers });
+        }
+
+        function clientSendLoop() { 
+            if(!isPlaying || !hostConnection) return; 
+            hostConnection.send({ 
+                type: 'updatePos', 
+                x: myCart.position.x, 
+                y: myCart.position.y, 
+                z: myCart.position.z,
+                lives: lives,
+                finished: localFinished,
+                rank: localRank
+            }); 
+        }
+
+        function checkEndGameConditions() {
+            if (!isHost || !isPlaying) return;
+            const pArray = Object.values(playersData);
+            const total = pArray.length;
+            
+            const finishedCount = pArray.filter(p => p.finished).length;
+            const deadCount = pArray.filter(p => p.lives <= 0).length;
+            const aliveCount = pArray.filter(p => p.lives > 0).length;
+
+            const allCompleted = (finishedCount + deadCount === total);
+            const onlyOneStanding = (aliveCount <= 1 && total > 1);
+
+            if (allCompleted || onlyOneStanding) {
+                isPlaying = false;
+                stopBGM();
+                SFX.win();
+
+                const sortedResults = [...pArray].sort((a, b) => {
+                    if (a.finished && !b.finished) return -1;
+                    if (!a.finished && b.finished) return 1;
+                    if (a.finished && b.finished) return a.rank - b.rank;
+                    
+                    if (a.lives > 0 && b.lives <= 0) return -1;
+                    if (a.lives <= 0 && b.lives > 0) return 1;
+                    
+                    return a.z - b.z; 
+                });
+
+                broadcast({ type: 'gameOver', results: sortedResults });
+                showEndScreen(sortedResults);
+            }
+        }
+
+        function handlePlayerWin(winnerId) {
+            if (!playersData[winnerId].finished) {
+                const nextRank = Object.values(playersData).filter(p => p.rank).length + 1;
+                playersData[winnerId].finished = true;
+                playersData[winnerId].rank = nextRank;
+                if (winnerId === peer.id) {
+                    localRank = nextRank;
+                    document.getElementById('finish-rank-text').innerText = getOrdinal(localRank);
+                    document.getElementById('finish-status').style.display = 'block';
+
+                    if (localRank === 1) {
+                        unlockAchievement("winner_winner");
+                    }
+                }
+                checkEndGameConditions();
+            }
+        }
+
+        function showEndScreen(results) {
+            document.getElementById('game-overlay').style.display = 'none'; 
+            document.getElementById('ui-layer').style.display = 'flex'; 
+            showPanel('panel-end');
+            
+            const myResult = results.find(r => r.id === peer.id);
+            const isWinner = myResult && myResult.rank === 1;
+            
+            document.getElementById('end-title').innerText = isWinner ? "YOU WON! 🏆" : "RACE FINISHED";
+            document.getElementById('end-title').style.color = isWinner ? 'var(--neon-blue)' : 'var(--neon-pink)';
+            
+            let trophyChange = -5;
+            let coinBonus = 20; // Default participation coins
+            if (myResult) {
+                if (myResult.rank === 1) { trophyChange = 15; coinBonus = 100; }
+                else if (myResult.rank === 2) { trophyChange = 8; coinBonus = 60; }
+                else if (myResult.rank === 3) { trophyChange = 3; coinBonus = 40; }
+                else if (myResult.lives <= 0) { trophyChange = -8; coinBonus = 10; }
+            }
+            
+            // Safe increment profile completed metrics and award Pac-Coins
+            profile.racesCompleted = (profile.racesCompleted || 0) + 1;
+            profile.trophies = Math.max(0, profile.trophies + trophyChange);
+            profile.coins = (profile.coins || 0) + coinBonus;
+            
+            // Check perfect run achievement
+            if (lives === 10 && !localDead) {
+                unlockAchievement("unstoppable");
+                unlockAchievement("survival_master");
+            }
+            if (lives === 7 && !localDead) {
+                unlockAchievement("lucky_seven");
+            }
+
+            saveProfileData();
+            updateLeagueAndSkinsUI();
+            
+            let statsHtml = `<div style="text-align: left; max-height: 200px; overflow-y: auto; margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.5); border-radius:5px;">`;
+            results.forEach((r, idx) => {
+                let statusText = "";
+                if (r.finished) {
+                    statusText = `Finished (${getOrdinal(r.rank)})`;
+                } else if (r.lives <= 0) {
+                    statusText = `☠️ Out of Lives`;
+                } else {
+                    statusText = `DNF (Active)`;
+                }
+                const highlight = r.id === peer.id ? 'border: 1px solid var(--neon-blue); background: rgba(0, 243, 255, 0.1);' : '';
+                statsHtml += `
+                    <div style="display: flex; justify-content: space-between; padding: 6px; margin-bottom: 4px; border-radius: 4px; ${highlight}">
+                        <span style="color: ${r.color}">#${idx + 1} ${r.name}</span>
+                        <span style="opacity: 0.8; font-size: 0.9rem;">${statusText}</span>
+                    </div>
+                `;
+            });
+            statsHtml += `</div>`;
+            statsHtml += `<div class="stats" style="margin-bottom: 5px;">Trophies: ${profile.trophies} (${trophyChange >= 0 ? '+' : ''}${trophyChange})</div>`;
+            statsHtml += `<div class="stats" style="color: var(--neon-gold)">Earned: +🪙 ${coinBonus} Pac-Coins!</div>`;
+            
+            document.getElementById('end-stats').innerHTML = statsHtml;
+        }
+
+        function triggerFreezeEffect() {
+            effects.freezeTime = 3.5;
+            SFX.crash();
+            createParticleBurst(myCart.position, 0xaaddff, 20, 0.2);
+        }
+
+        function triggerDefeatEffect() {
+            effects.spinTime = 1.5;
+            speed *= 0.3;
+            SFX.crash();
+            createParticleBurst(myCart.position, 0xff00ea, 25, 0.25);
+            setTimeout(() => {
+                effects.sadTime = 2.0;
+            }, 500);
+        }
+
+        function triggerLaserBeamVisual(startX, startZ) {
+            playTone(800, 'triangle', 0.25, 0.1);
+            const material = new THREE.LineBasicMaterial({ color: 0xff0055, linewidth: 8 });
+            const points = [
+                new THREE.Vector3(startX, 0.5, startZ),
+                new THREE.Vector3(startX, 0.5, startZ - 50.0)
+            ];
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geometry, material);
+            scene.add(line);
+            setTimeout(() => {
+                scene.remove(line);
+                geometry.dispose();
+                material.dispose();
+            }, 250);
+            createParticleBurst(points[1], 0xff0055, 12, 0.2);
+        }
+
+        function triggerQuickDash() {
+            if (dotCount < 10 || isDashing || isCountdown || localFinished || localDead) return;
+            
+            dotCount = 0;
+            updateDashBarUI();
+            
+            isDashing = true;
+            dashTimeRemaining = dashDuration;
+            
+            maxSpeed = 8.0; 
+            speed = 8.0; 
+            SFX.dash();
+            
+            effects.happyTime = 1.2;
+            createParticleBurst(myCart.position, 0x00f3ff, 30, 0.3);
+        }
+
+        // ==========================================
+        // AMBIENT WEATHER PARTICLE ENGINE
+        // ==========================================
+        function spawnAmbientWeatherParticle(mapId) {
+            if (ambientWeatherParticles.length > 50) return; // Prevent performance bottlenecks
+
+            let col = 0xffffff;
+            let sz = 0.15;
+            let pGeo = particleGeometry;
+            
+            if (mapId === "frozen_peaks") {
+                col = 0xffffff; sz = 0.12; // Falling fluffy snowflakes
+            } else if (mapId === "lava" || mapId === "volcano_core") {
+                col = 0xff3300; sz = 0.18; // Rising glowing volcanic ash
+            } else if (mapId === "crystal_ocean") {
+                col = 0x00f3ff; sz = 0.08; // Translucent floating marine bubble
+                pGeo = new THREE.SphereGeometry(0.1, 8, 8);
+            } else if (mapId === "ghost_railway") {
+                col = 0x800080; sz = 0.2; // Misty purple wisps
+            } else if (mapId === "retro_arcade" || mapId === "neon_city") {
+                col = 0x39ff14; sz = 0.08; // Falling green binary/cyber star
+            } else {
+                return; // Normal weather
+            }
+
+            const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7 });
+            const mesh = new THREE.Mesh(pGeo, mat);
+            
+            // Randomly position near camera view zone
+            mesh.position.set(
+                myCart.position.x + (Math.random() - 0.5) * 15,
+                myCart.position.y + 2 + (Math.random() - 0.5) * 6,
+                myCart.position.z - 25 - Math.random() * 40
+            );
+            scene.add(mesh);
+            
+            let vel = new THREE.Vector3(0, -0.04, 0.05); // Default falling
+            if (mapId === "lava" || mapId === "volcano_core") {
+                vel.set(0, 0.06, 0.02); // Rising ash
+            } else if (mapId === "crystal_ocean") {
+                vel.set(Math.sin(Date.now() * 0.005) * 0.02, 0.05, 0.03); // Floating bubbles
+            }
+
+            ambientWeatherParticles.push({
+                mesh: mesh,
+                velocity: vel,
+                life: 1.0,
+                mapId: mapId
+            });
+        }
+
+        function updateDashBarUI() {
+            const percentage = Math.min(100, (dotCount / 10) * 100);
+            const bar = document.getElementById('dash-gauge-bar');
+            const btn = document.getElementById('btn-dash-action');
+            if (bar) bar.style.width = percentage + '%';
+            if (btn) {
+                if (dotCount >= 10) {
+                    btn.classList.add('ready');
+                } else {
+                    btn.classList.remove('ready');
+                }
+            }
+        }
+
+        function updateStatusHUDEffects() {
+            const hud = document.getElementById('status-effects-hud');
+            if (!hud) return;
+
+            let activeText = [];
+            if (effects.shieldBarrier > 0) activeText.push(`SHIELD x${effects.shieldBarrier}`);
+            if (effects.ghostCloakTime > 0) activeText.push("GHOST MODE");
+            if (effects.giantPacTime > 0) activeText.push("GIANT MODE");
+            if (effects.spicyChiliTime > 0) activeText.push("SPICY SPEED");
+            if (effects.bubbleFloatTime > 0) activeText.push("BUBBLE FLOAT");
+            if (effects.windGlideTime > 0) activeText.push("LOW GRAVITY");
+            if (effects.autopilotCount > 0) activeText.push("AUTOPILOT");
+            if (effects.rapidZapTime > 0) activeText.push("LASER CHAIN");
+            if (effects.powerPelletTime > 0) activeText.push("POWER INVINCIBILITY");
+            
+            if (effects.magnetTime > 0) activeText.push("MAGNET ACTIVE");
+            if (effects.gravityFlipTime > 0) activeText.push("CEILING RUNNING");
+            if (effects.slowMoFieldTime > 0) activeText.push("TEMPORAL FIELD");
+            if (effects.phoenixFireTime > 0) activeText.push("PHOENIX BLAZE");
+            if (effects.electricTrailTime > 0) activeText.push("TESLA TRACKS");
+            if (effects.windVortexTime > 0) activeText.push("GALE BOOST");
+            if (effects.rainbowBridgeTime > 0) activeText.push("PRISM ROAD");
+            if (effects.pixelShieldCount > 0) activeText.push(`RETRO SHIELD x${effects.pixelShieldCount}`);
+
+            if (activeText.length > 0) {
+                hud.innerText = activeText.join(" | ");
+                hud.style.display = "block";
+            } else {
+                hud.style.display = "none";
+            }
+        }
+
+        // ==========================================
+        // 52 POWER-UPS LOGIC SWITCH WITH UPGRADES!
+        // ==========================================
+        function useItem() {
+            if(myItem === null || localFinished || localDead) return;
+            SFX.itemUse();
+            
+            const powerupObj = myItem; // item object {id, emoji, name}
+            myItem = null; 
+            document.getElementById('item-emoji-hud').innerText = "❓";
+            document.getElementById('item-name-hud').innerText = "NO ITEM";
+            
+            effects.happyTime = 1.5; 
+            unlockAchievement("full_arsenal");
+
+            // Retrieve infinite upgrade multipliers
+            const mult = getUpgradeMultiplier(powerupObj.id);
+
+            switch(powerupObj.id) {
+                case "speed_boost":
+                    maxSpeed = 6.5 + (getPowerupLevel(powerupObj.id) - 1) * 0.2; 
+                    speed = maxSpeed;
+                    createParticleBurst(myCart.position, 0x00ff00, 25, 0.25);
+                    setTimeout(() => maxSpeed = 3.5, 4000 * mult); 
+                    break;
+                
+                case "power_pellet":
+                    effects.powerPelletTime = 10.0 * mult; 
+                    myCart.children[0].material.emissive.setHex(0xffff00); 
+                    break;
+
+                case "freeze":
+                    if (isHost) {
+                        broadcast({ type: 'freeze', sender: peer.id });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'freeze' });
+                    }
+                    createParticleBurst(myCart.position, 0xaaddff, 30, 0.2);
+                    break;
+
+                case "laser":
+                    const startX = myCart.position.x;
+                    const startZ = myCart.position.z;
+                    if (isHost) {
+                        broadcast({ type: 'laserShoot', x: startX, z: startZ });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'laserShoot', x: startX, z: startZ });
+                    }
+                    triggerLaserBeamVisual(startX, startZ);
+                    blastObstaclesInFront(startX, startZ, 50.0 * mult);
+                    break;
+
+                case "cherry_bomb":
+                    if (isHost) {
+                        broadcast({ type: 'dropBomb', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'dropBomb', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    }
+                    triggerSpawnObsVisual(myCart.position.x, myCart.position.z + 5.0, true);
+                    break;
+
+                case "shield_barrier":
+                    effects.shieldBarrier += Math.floor(1 * mult);
+                    createParticleBurst(myCart.position, 0x00f3ff, 15, 0.2);
+                    break;
+
+                case "ghost_cloak":
+                    effects.ghostCloakTime = 6.0 * mult;
+                    myCart.children[0].material.opacity = 0.4;
+                    createParticleBurst(myCart.position, 0xffffff, 20, 0.15);
+                    break;
+
+                case "star_invincible":
+                    effects.powerPelletTime = 5.0 * mult;
+                    maxSpeed = 5.5 + (getPowerupLevel(powerupObj.id) - 1) * 0.15; 
+                    speed = maxSpeed;
+                    createParticleBurst(myCart.position, 0xfff300, 40, 0.25);
+                    setTimeout(() => maxSpeed = 3.5, 5000 * mult);
+                    break;
+
+                case "shockwave":
+                    if (isHost) {
+                        broadcast({ type: 'freeze', sender: peer.id });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'freeze' });
+                    }
+                    createParticleBurst(myCart.position, 0xe040fb, 25, 0.3);
+                    break;
+
+                case "tornado_strike":
+                    obstacles.forEach(o => {
+                        if (o.mesh.position.z < myCart.position.z && myCart.position.z - o.mesh.position.z < 30.0 * mult) {
+                            o.mesh.position.y = -10;
+                            createParticleBurst(o.mesh.position, 0x888888, 5, 0.2);
+                        }
+                    });
+                    break;
+
+                case "bubble_float":
+                    effects.bubbleFloatTime = 4.0 * mult;
+                    createParticleBurst(myCart.position, 0x00d2ff, 18, 0.2);
+                    break;
+
+                case "autopilot":
+                    effects.autopilotCount = Math.floor(3 * mult);
+                    break;
+
+                case "time_warp":
+                    createParticleBurst(myCart.position, 0x9b59b6, 20, 0.2);
+                    playTone(200, 'sine', 0.5);
+                    break;
+
+                case "shock_blast":
+                    obstacles.forEach(o => {
+                        if (myCart.position.distanceTo(o.mesh.position) < 25.0 * mult) {
+                            o.mesh.position.y = -10;
+                            createParticleBurst(o.mesh.position, 0xffaa00, 10, 0.2);
+                        }
+                    });
+                    break;
+
+                case "lucky_clover":
+                    dotCount = Math.min(10, dotCount + Math.floor(5 * mult));
+                    updateDashBarUI();
+                    createParticleBurst(myCart.position, 0x2ecc71, 15, 0.2);
+                    break;
+
+                case "gold_rush":
+                    dotCount = Math.min(10, dotCount + Math.floor(2 * mult));
+                    updateDashBarUI();
+                    maxSpeed = 6.0 + (getPowerupLevel(powerupObj.id) - 1) * 0.15; 
+                    speed = maxSpeed;
+                    createParticleBurst(myCart.position, 0xffd700, 30, 0.2);
+                    setTimeout(() => maxSpeed = 3.5, 3000 * mult);
+                    break;
+
+                case "giant_pac":
+                    effects.giantPacTime = 6.0 * mult;
+                    myCart.scale.set(2.2, 2.2, 2.2);
+                    createParticleBurst(myCart.position, 0xffff00, 30, 0.3);
+                    break;
+
+                case "decoy":
+                    if (isHost) {
+                        broadcast({ type: 'dropDecoy', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'dropDecoy', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    }
+                    triggerSpawnObsVisual(myCart.position.x, myCart.position.z + 5.0, false);
+                    break;
+
+                case "spicy_chili":
+                    effects.spicyChiliTime = 5.0 * mult;
+                    maxSpeed = 7.0 + (getPowerupLevel(powerupObj.id) - 1) * 0.2; 
+                    speed = maxSpeed;
+                    createParticleBurst(myCart.position, 0xff3300, 25, 0.2);
+                    break;
+
+                case "smoke_screen":
+                    createParticleBurst(myCart.position, 0x111111, 40, 0.4);
+                    break;
+
+                case "obstacle_axe":
+                    blastObstaclesInFront(myCart.position.x, myCart.position.z, 20.0 * mult);
+                    break;
+
+                case "boomerang":
+                    pacDots.forEach(pd => {
+                        if (pd.active && pd.mesh.position.z < myCart.position.z && myCart.position.z - pd.mesh.position.z < 40 * mult) {
+                            pd.mesh.position.lerp(myCart.position, 0.85);
+                        }
+                    });
+                    break;
+
+                case "ice_spike":
+                    blastObstaclesInFront(myCart.position.x, myCart.position.z, 40.0 * mult);
+                    break;
+
+                case "spring_glove":
+                    createParticleBurst(myCart.position, 0xe74c3c, 20, 0.2);
+                    break;
+
+                case "mystery_present":
+                    maxSpeed = 7.5 + (getPowerupLevel(powerupObj.id) - 1) * 0.2; 
+                    speed = maxSpeed;
+                    createParticleBurst(myCart.position, 0xffd700, 35, 0.25);
+                    setTimeout(() => maxSpeed = 3.5, 4000 * mult);
+                    break;
+
+                case "black_hole":
+                    obstacles.forEach(o => {
+                        if (o.mesh.position.z < myCart.position.z) {
+                            o.mesh.position.y = -10;
+                        }
+                    });
+                    createParticleBurst(myCart.position, 0x000000, 50, 0.35);
+                    break;
+
+                case "clone_mine":
+                    if (isHost) {
+                        broadcast({ type: 'dropBomb', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'dropBomb', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    }
+                    triggerSpawnObsVisual(myCart.position.x, myCart.position.z + 5.0, true);
+                    break;
+
+                case "wind_glide":
+                    effects.windGlideTime = 6.0 * mult;
+                    break;
+
+                case "strawberry_zap":
+                    effects.rapidZapTime = 5.0 * mult;
+                    break;
+
+                case "melon_bounce":
+                    velocityY = 0.55 * mult;
+                    isGrounded = false;
+                    break;
+
+                // ==========================================
+                // 22 UNIQUE POWER-UPS ACTIONS WITH MULTIPLIERS
+                // ==========================================
+                case "magnet_sphere":
+                    effects.magnetTime = 8.0 * mult;
+                    createParticleBurst(myCart.position, 0xff0055, 15, 0.25);
+                    break;
+
+                case "portal_jump":
+                    myCart.position.z -= (25.0 * mult); // Warp forward safely
+                    playTone(900, 'sine', 0.35, 0.2);
+                    createParticleBurst(myCart.position, 0x00f3ff, 35, 0.3);
+                    break;
+
+                case "life_drain":
+                    lives = Math.min(10, lives + Math.floor(1 * mult));
+                    document.getElementById('lives-count').innerText = lives;
+                    createParticleBurst(myCart.position, 0x9b0000, 15, 0.22);
+                    playTone(250, 'sawtooth', 0.4);
+                    for (let id in playersData) {
+                        if (id !== peer.id) {
+                            if (isHost) {
+                                broadcast({ type: 'shatterPulse', sender: peer.id });
+                            } else if (hostConnection) {
+                                hostConnection.send({ type: 'shatterPulse' });
+                            }
+                        }
+                    }
+                    break;
+
+                case "gravity_flip":
+                    effects.gravityFlipTime = 6.0 * mult;
+                    createParticleBurst(myCart.position, 0x39ff14, 20, 0.25);
+                    break;
+
+                case "banana_peel":
+                    if (isHost) {
+                        broadcast({ type: 'dropBanana', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'dropBanana', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    }
+                    triggerSpawnBananaVisual(myCart.position.x, myCart.position.z + 5.0);
+                    break;
+
+                case "shield_shatter":
+                    if (isHost) {
+                        broadcast({ type: 'shatterPulse', sender: peer.id });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'shatterPulse' });
+                    }
+                    triggerShatterEffect();
+                    break;
+
+                case "phase_shifter":
+                    // Swap position with closest player ahead
+                    let playerAhead = null;
+                    let minAheadZDiff = Infinity;
+                    for (let id in playersData) {
+                        if (id !== peer.id) {
+                            let diff = myCart.position.z - playersData[id].z; 
+                            if (diff > 0 && diff < minAheadZDiff) {
+                                minAheadZDiff = diff;
+                                playerAhead = id;
+                            }
+                        }
+                    }
+                    if (playerAhead) {
+                        const tempZ = myCart.position.z;
+                        myCart.position.z = playersData[playerAhead].z;
+                        playersData[playerAhead].z = tempZ;
+                        createParticleBurst(myCart.position, 0xe040fb, 30, 0.35);
+                    } else {
+                        myCart.position.z -= (10.0 * mult);
+                        createParticleBurst(myCart.position, 0xe040fb, 15, 0.25);
+                    }
+                    break;
+
+                case "slow_mo_aura":
+                    effects.slowMoFieldTime = 6.0 * mult;
+                    createParticleBurst(myCart.position, 0x00f3ff, 20, 0.2);
+                    break;
+
+                case "double_trouble":
+                    LANES.forEach((lx, idx) => {
+                        if(idx !== currentLaneIdx) {
+                            triggerSpawnObsVisual(lx, myCart.position.z - 8.0, false);
+                        }
+                    });
+                    break;
+
+                case "bouncing_bullet":
+                    // Spawns forward melon shell projectile
+                    const projectileGeo = new THREE.SphereGeometry(0.45 * mult, 16, 16);
+                    const projectileMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 0.1 });
+                    const projectile = new THREE.Mesh(projectileGeo, projectileMat);
+                    projectile.position.set(myCart.position.x, 0.4, myCart.position.z - 4.0);
+                    scene.add(projectile);
+                    
+                    const projectileTimer = setInterval(() => {
+                        if(!isPlaying) return clearInterval(projectileTimer);
+                        projectile.position.z -= (1.8 * mult);
+                        projectile.position.y = 0.4 + Math.abs(Math.sin(Date.now() * 0.025)) * 0.8;
+                        createParticleBurst(projectile.position, 0x2ecc71, 1, 0.1);
+                        blastObstaclesInFront(projectile.position.x, projectile.position.z, 2.5);
+                        if(projectile.position.z < myCart.position.z - 120.0) {
+                            scene.remove(projectile);
+                            projectileGeo.dispose();
+                            projectileMat.dispose();
+                            clearInterval(projectileTimer);
+                        }
+                    }, 30);
+                    break;
+
+                case "anvil_drop":
+                    let targetX = myCart.position.x;
+                    let targetZ = myCart.position.z - 20.0;
+                    let targetId = null;
+                    for (let id in playersData) {
+                        if (id !== peer.id && playersData[id].z < myCart.position.z) {
+                            targetId = id;
+                            targetX = playersData[id].x;
+                            targetZ = playersData[id].z - 15.0;
+                            break;
+                        }
+                    }
+                    if (isHost) {
+                        broadcast({ type: 'dropBomb', x: targetX, z: targetZ });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'dropBomb', x: targetX, z: targetZ });
+                    }
+                    triggerSpawnAnvilVisual(targetX, targetZ);
+                    break;
+
+                case "speed_pad_spawn":
+                    effects.speedPadTime = 5.0 * mult;
+                    maxSpeed = 6.0 + (getPowerupLevel(powerupObj.id) - 1) * 0.15; 
+                    speed = maxSpeed;
+                    createParticleBurst(myCart.position, 0xffd700, 20, 0.25);
+                    break;
+
+                case "pixel_shield":
+                    effects.pixelShieldCount = Math.floor(3 * mult);
+                    createParticleBurst(myCart.position, 0x39ff14, 25, 0.2);
+                    break;
+
+                case "phoenix_fire":
+                    effects.phoenixFireTime = 6.0 * mult;
+                    createParticleBurst(myCart.position, 0xff2200, 30, 0.3);
+                    break;
+
+                case "sound_wave":
+                    LANES.forEach(lx => {
+                        blastObstaclesInFront(lx, myCart.position.z, 40.0 * mult);
+                    });
+                    createParticleBurst(myCart.position, 0xffffff, 25, 0.4);
+                    break;
+
+                case "shrink_ray":
+                    effects.shrinkTime = 5.0 * mult;
+                    myCart.scale.set(0.5, 0.5, 0.5);
+                    createParticleBurst(myCart.position, 0x00aaff, 15, 0.15);
+                    break;
+
+                case "meteor_strike":
+                    for (let step = 1; step <= 3; step++) {
+                        const mX = LANES[Math.floor(Math.random() * 4)];
+                        const mZ = myCart.position.z - (step * 20.0);
+                        triggerSpawnObsVisual(mX, mZ, true);
+                    }
+                    break;
+
+                case "sticky_tar":
+                    if (isHost) {
+                        broadcast({ type: 'dropTar', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    } else if (hostConnection) {
+                        hostConnection.send({ type: 'dropTar', x: myCart.position.x, z: myCart.position.z + 5.0 });
+                    }
+                    triggerSpawnTarVisual(myCart.position.x, myCart.position.z + 5.0);
+                    break;
+
+                case "electric_trail":
+                    effects.electricTrailTime = 6.0 * mult;
+                    createParticleBurst(myCart.position, 0x00f3ff, 20, 0.2);
+                    break;
+
+                case "wind_vortex":
+                    effects.windVortexTime = 5.0 * mult;
+                    break;
+
+                case "rainbow_bridge":
+                    effects.rainbowBridgeTime = 6.0 * mult;
+                    createParticleBurst(myCart.position, 0xff00ea, 25, 0.25);
+                    break;
+
+                case "dice_roll":
+                    const rolling = Math.random();
+                    if(rolling < 0.33) {
+                        effects.shieldBarrier += Math.floor(2 * mult);
+                        document.getElementById('item-name-hud').innerText = "DICE: DOUBLE SHIELD!";
+                    } else if (rolling < 0.66) {
+                        dotCount = 10;
+                        updateDashBarUI();
+                        document.getElementById('item-name-hud').innerText = "DICE: FREE DASH!";
+                    } else {
+                        maxSpeed = 7.0 + (getPowerupLevel(powerupObj.id) - 1) * 0.20; 
+                        speed = maxSpeed;
+                        setTimeout(() => maxSpeed = 3.5, 5000 * mult);
+                        document.getElementById('item-name-hud').innerText = "DICE: MAX SPEED!";
+                    }
+                    createParticleBurst(myCart.position, 0xffffff, 30, 0.3);
+                    break;
+            }
+
+            updateStatusHUDEffects();
+        }
+
+        function blastObstaclesInFront(startX, startZ, range) {
+            obstacles.forEach(o => {
+                if (Math.abs(o.mesh.position.x - startX) < 0.6 && o.mesh.position.z < startZ && startZ - o.mesh.position.z < range) {
+                    createParticleBurst(o.mesh.position, 0xff0055, 15, 0.2);
+                    o.mesh.position.y = -10; 
+                }
+            });
+        }
+
+        function handleAutoSteerDodge() {
+            if (effects.autopilotCount <= 0) return;
+            const currentLaneCoord = LANES[currentLaneIdx];
+            
+            const immediateObs = obstacles.find(o => 
+                Math.abs(o.mesh.position.x - currentLaneCoord) < 0.2 && 
+                o.mesh.position.z < myCart.position.z && 
+                myCart.position.z - o.mesh.position.z < 12.0 &&
+                o.mesh.position.y > -5
+            );
+
+            if (immediateObs) {
+                let choices = [];
+                if (currentLaneIdx > 0) choices.push(currentLaneIdx - 1);
+                if (currentLaneIdx < 3) choices.push(currentLaneIdx + 1);
+                
+                if (choices.length > 0) {
+                    currentLaneIdx = choices[0];
+                    effects.autopilotCount--;
+                    SFX.jump();
+                    updateStatusHUDEffects();
+                }
+            }
+        }
+
+        // ==========================================
+        // MAIN GAME ANIMATION TICK LOOP
+        // ==========================================
+        function animate() {
+            if(!isPlaying) return;
+            animationFrameId = requestAnimationFrame(animate);
+
+            const pelletHue = (Date.now() * 0.001) % 1.0;
+            itemBoxes.forEach(ib => {
+                if (ib.active && ib.mesh.userData && ib.mesh.userData.coreMat) {
+                    ib.mesh.userData.coreMat.color.setHSL(pelletHue, 1.0, 0.5);
+                }
+            });
+
+            // Handle rotating environment decorations (Robot factory cogs & Rainbow Dimension stars)
+            environmentDecorations.forEach(d => {
+                if (d.userData) {
+                    if (d.userData.gear && d.userData.rotSpeed) {
+                        d.userData.gear.rotation.y += d.userData.rotSpeed;
+                    }
+                    if (d.userData.stars) {
+                        d.userData.stars.forEach((star, idx) => {
+                            star.rotation.y += 0.015 * (idx === 0 ? 1 : -1);
+                            star.rotation.z += 0.01;
+                        });
+                    }
+                }
+            });
+
+            // Spawn ambient weather particles in real time
+            if (Math.random() < 0.2) {
+                spawnAmbientWeatherParticle(selectedMapId);
+            }
+
+            // Update ambient weather particles
+            for (let i = ambientWeatherParticles.length - 1; i >= 0; i--) {
+                const wp = ambientWeatherParticles[i];
+                wp.mesh.position.add(wp.velocity);
+                
+                // Remove if out of tracking range
+                if (Math.abs(wp.mesh.position.z - myCart.position.z) > 80.0) {
+                    scene.remove(wp.mesh);
+                    ambientWeatherParticles.splice(i, 1);
+                }
+            }
+
+            // Handle autopilot lane dodge steering
+            if (effects.autopilotCount > 0) {
+                handleAutoSteerDodge();
+            }
+
+            if (!isCountdown) {
+                if (localFinished) {
+                    speed = 1.0;
+                    myCart.position.x += (LANES[currentLaneIdx] - myCart.position.x) * 0.2;
+                    myCart.position.z -= speed;
+                } else if (localDead) {
+                    speed = 0;
+                    myCart.position.y += (-5 - myCart.position.y) * 0.1;
+                } else {
+                    myCart.position.x += (LANES[currentLaneIdx] - myCart.position.x) * 0.2;
+
+                    // Dash timers logic
+                    if (isDashing) {
+                        dashTimeRemaining -= 0.016;
+                        if (Math.random() < 0.4) {
+                            tempVec3.set(myCart.position.x, 0.1, myCart.position.z + 1.0);
+                            createParticleBurst(tempVec3, 0x00f3ff, 3, 0.1);
+                        }
+                        if (dashTimeRemaining <= 0) {
+                            isDashing = false;
+                            maxSpeed = 3.5;
+                        }
+                    }
+
+                    if (effects.magnetTime > 0) {
+                        effects.magnetTime -= 0.016;
+                        pacDots.forEach(pd => {
+                            if (pd.active && Math.abs(pd.mesh.position.z - myCart.position.z) < 15.0) {
+                                pd.mesh.position.lerp(myCart.position, 0.15);
+                            }
+                        });
+                        if (effects.magnetTime <= 0) updateStatusHUDEffects();
+                    }
+
+                    if (effects.gravityFlipTime > 0) {
+                        effects.gravityFlipTime -= 0.016;
+                        myCart.position.y = 2.5; // Walk on ceiling rails
+                        myCart.rotation.x = Math.PI; // Flip upside down!
+                        isGrounded = false;
+                        if (effects.gravityFlipTime <= 0) {
+                            myCart.position.y = 0;
+                            myCart.rotation.x = 0;
+                            isGrounded = true;
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    if (effects.slowMoFieldTime > 0) {
+                        effects.slowMoFieldTime -= 0.016;
+                        obstacles.forEach(o => {
+                            if (o.mesh.position.distanceTo(myCart.position) < 8.0) {
+                                o.mesh.position.y = -1; // Temp sink them
+                            }
+                        });
+                        if (effects.slowMoFieldTime <= 0) updateStatusHUDEffects();
+                    }
+
+                    if (effects.phoenixFireTime > 0) {
+                        effects.phoenixFireTime -= 0.016;
+                        blastObstaclesInFront(myCart.position.x, myCart.position.z, 6.0);
+                        if (Math.random() < 0.3) {
+                            createParticleBurst(myCart.position, 0xff5500, 3, 0.1);
+                        }
+                        if (effects.phoenixFireTime <= 0) updateStatusHUDEffects();
+                    }
+
+                    if (effects.electricTrailTime > 0) {
+                        effects.electricTrailTime -= 0.016;
+                        if (Math.random() < 0.2) {
+                            createParticleBurst(myCart.position, 0x00ffff, 4, 0.1);
+                        }
+                        if (effects.electricTrailTime <= 0) updateStatusHUDEffects();
+                    }
+
+                    if (effects.windVortexTime > 0) {
+                        effects.windVortexTime -= 0.016;
+                        maxSpeed = 5.0; speed = 5.0;
+                        if (effects.windVortexTime <= 0) {
+                            maxSpeed = 3.5;
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    if (effects.rainbowBridgeTime > 0) {
+                        effects.rainbowBridgeTime -= 0.016;
+                        myCart.position.y = 1.8; // Floating over track obstacles
+                        isGrounded = false;
+                        if (Math.random() < 0.3) {
+                            createParticleBurst(myCart.position, 0xff00ea, 2, 0.1);
+                        }
+                        if (effects.rainbowBridgeTime <= 0) {
+                            myCart.position.y = 0;
+                            isGrounded = true;
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    if (effects.shrinkTime > 0) {
+                        effects.shrinkTime -= 0.016;
+                        if (effects.shrinkTime <= 0) {
+                            myCart.scale.set(1, 1, 1);
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    // Ghost / Intangible power down
+                    if (effects.ghostCloakTime > 0) {
+                        effects.ghostCloakTime -= 0.016;
+                        if (effects.ghostCloakTime <= 0) {
+                            myCart.children[0].material.opacity = 1.0;
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    // Giant scale-back power down
+                    if (effects.giantPacTime > 0) {
+                        effects.giantPacTime -= 0.016;
+                        if (effects.giantPacTime <= 0) {
+                            myCart.scale.set(1.0, 1.0, 1.0);
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    // Spicy chili slide timer
+                    if (effects.spicyChiliTime > 0) {
+                        effects.spicyChiliTime -= 0.016;
+                        myCart.position.x += Math.sin(Date.now() * 0.05) * 0.08;
+                        if (effects.spicyChiliTime <= 0) {
+                            maxSpeed = 3.5;
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    // Bubble float above ground
+                    if (effects.bubbleFloatTime > 0) {
+                        effects.bubbleFloatTime -= 0.016;
+                        myCart.position.y = 1.1 + Math.sin(Date.now() * 0.01) * 0.1;
+                        isGrounded = false;
+                        if (effects.bubbleFloatTime <= 0) {
+                            myCart.position.y = 0;
+                            isGrounded = true;
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    // Wind glide low gravity jumps
+                    if (effects.windGlideTime > 0) {
+                        effects.windGlideTime -= 0.016;
+                        if (effects.windGlideTime <= 0) {
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    // Rapid continuous shoot projectiles
+                    if (effects.rapidZapTime > 0) {
+                        effects.rapidZapTime -= 0.016;
+                        if (Math.random() < 0.1) {
+                            triggerLaserBeamVisual(myCart.position.x, myCart.position.z);
+                            blastObstaclesInFront(myCart.position.x, myCart.position.z, 20.0);
+                        }
+                        if (effects.rapidZapTime <= 0) {
+                            updateStatusHUDEffects();
+                        }
+                    }
+
+                    if (input.speedUp) {
+                        speed += 0.035;
+                    } else if (input.speedDown) {
+                        speed -= 0.035;
+                    }
+                    
+                    if (speed > 6.0) {
+                        unlockAchievement("speed_demon");
+                    }
+
+                    speed = Math.max(0, Math.min(speed, maxSpeed));
+                    myCart.position.z -= speed;
+
+                    if(input.jump && (isGrounded || effects.windGlideTime > 0)) { 
+                        velocityY = effects.windGlideTime > 0 ? 0.25 : 0.42; 
+                        isGrounded = false; SFX.jump(); input.jump = false; 
+                        createParticleBurst(myCart.position, 0xffffff, 8, 0.1);
+                    }
+
+                    if (effects.bubbleFloatTime <= 0 && effects.rainbowBridgeTime <= 0 && effects.gravityFlipTime <= 0) {
+                        myCart.position.y += velocityY;
+                        if(myCart.position.y > 0) velocityY -= effects.windGlideTime > 0 ? 0.008 : 0.02;
+                        if(myCart.position.y <= 0) { myCart.position.y = 0; velocityY = 0; isGrounded = true; }
+                    }
+                }
+            } else {
+                speed = 0; 
+            }
+
+            if (effects.powerPelletTime > 0 && !localFinished && !localDead) {
+                effects.powerPelletTime -= 0.016;
+                myCart.children[0].material.emissive.setHSL((Date.now() * 0.001) % 1.0, 1.0, 0.3);
+                
+                for (let id in playersData) {
+                    if (id !== peer.id) {
+                        const otherP = playersData[id];
+                        tempVec3.set(otherP.x, otherP.y, otherP.z);
+                        const dist = myCart.position.distanceTo(tempVec3);
+                        if (dist < 2.0 && !otherP.finished && otherP.lives > 0) {
+                            if (isHost) {
+                                broadcast({ type: 'defeatPlayer', target: id });
+                            } else if (hostConnection) {
+                                hostConnection.send({ type: 'defeatPlayer', target: id });
+                            }
+                        }
+                    }
+                }
+
+                if (effects.powerPelletTime <= 0) {
+                    myCart.children[0].material.emissive.setHex(0x000000);
+                    updateStatusHUDEffects();
+                }
+            }
+
+            if (myCart.children[0]) {
+                myCart.children[0].rotation.z = Math.sin(Date.now() * 0.015) * 0.03 * (speed / maxSpeed);
+                myCart.children[0].rotation.x = Math.sin(Date.now() * 0.02) * 0.025 * (speed / maxSpeed);
+            }
+
+            if (profile.copilotType === "rainbow" && myCart.userData && myCart.userData.copilot) {
+                myCart.userData.copilot.pmMaterial.color.setHSL((Date.now() * 0.002) % 1.0, 0.9, 0.6);
+            }
+
+            let currentExp = 'default';
+            if (effects.sadTime > 0) {
+                effects.sadTime -= 0.016;
+                currentExp = 'sad';
+            } else if (effects.happyTime > 0) {
+                effects.happyTime -= 0.016;
+                currentExp = 'happy';
+            } else {
+                const currentLaneCoord = LANES[currentLaneIdx];
+                const nearbyObstacle = obstacles.some(o => 
+                    Math.abs(o.mesh.position.x - currentLaneCoord) < 0.2 && 
+                    o.mesh.position.z < myCart.position.z && 
+                    myCart.position.z - o.mesh.position.z < 25.0
+                );
+                if (nearbyObstacle && effects.powerPelletTime <= 0 && !localFinished && !localDead) {
+                    currentExp = 'scared';
+                }
+            }
+
+            const animateCopilot = (copilot, exp) => {
+                if (!copilot) return;
+                const { topHalf, bottomHalf, leftEye, rightEye, pmMaterial, eyeMat, copilotType } = copilot;
+                
+                copilot.mesh.position.y = 0.75;
+                leftEye.scale.set(1, 1, 1);
+                rightEye.scale.set(1, 1, 1);
+                eyeMat.color.setHex(0x000000); 
+                
+                let defaultCol = 0xffff00;
+                const matched = SKINS.find(s => s.id === copilotType);
+                if (matched) {
+                    defaultCol = matched.color;
+                }
+                
+                if (copilotType !== "rainbow") {
+                    pmMaterial.color.setHex(defaultCol);
+                }
+
+                if (exp === 'sad') {
+                    topHalf.rotation.x = 0;
+                    bottomHalf.rotation.x = 0;
+                    copilot.mesh.position.y = 0.65; 
+                    leftEye.scale.set(0.6, 0.6, 0.6);
+                    rightEye.scale.set(0.6, 0.6, 0.6);
+                    eyeMat.color.setHex(0x5555ff); 
+                    if (copilotType !== "rainbow") pmMaterial.color.setHex(0xd0d090);
+                } 
+                else if (exp === 'happy' || effects.powerPelletTime > 0) {
+                    const mouthSpeed = isCountdown ? 0.01 : 0.035;
+                    const mouthAngle = (Math.sin(Date.now() * mouthSpeed) + 1) * 0.25;
+                    topHalf.rotation.x = -mouthAngle;
+                    bottomHalf.rotation.x = mouthAngle;
+                    
+                    copilot.mesh.position.y = 0.75 + Math.abs(Math.sin(Date.now() * 0.015)) * 0.15; 
+                    leftEye.scale.set(1.2, 1.2, 1.2);
+                    rightEye.scale.set(1.2, 1.2, 1.2);
+                    eyeMat.color.setHex(0x00ffff);
+                } 
+                else if (exp === 'scared') {
+                    topHalf.rotation.x = -0.55;
+                    bottomHalf.rotation.x = 0.55;
+                    leftEye.scale.set(1.5, 1.5, 1.5);
+                    rightEye.scale.set(1.5, 1.5, 1.5);
+                    eyeMat.color.setHex(0xffffff);
+                    
+                    copilot.mesh.position.x = (Math.random() - 0.5) * 0.05;
+                    copilot.mesh.position.y = 0.75 + (Math.random() - 0.5) * 0.05;
+                } 
+                else {
+                    const mouthSpeed = isCountdown ? 0.005 : 0.015;
+                    const mouthAngle = (Math.sin(Date.now() * mouthSpeed) + 1) * 0.15;
+                    topHalf.rotation.x = -mouthAngle;
+                    bottomHalf.rotation.x = mouthAngle;
+                    copilot.mesh.position.x = 0;
+                }
+            };
+
+            if (myCart.userData && myCart.userData.copilot) {
+                animateCopilot(myCart.userData.copilot, currentExp);
+            }
+
+            for (let id in otherCarts) {
+                const c = otherCarts[id];
+                if (c && c.userData && c.userData.copilot) {
+                    animateCopilot(c.userData.copilot, 'default');
+                }
+            }
+
+            if (effects.spinTime > 0) {
+                effects.spinTime -= 0.016;
+                myCart.rotation.y += 0.3;
+                createParticleBurst(myCart.position, 0xff00ea, 1, 0.08);
+            } else {
+                if (effects.gravityFlipTime <= 0) myCart.rotation.y = 0;
+            }
+
+            if (effects.freezeTime > 0 && !localFinished && !localDead) {
+                effects.freezeTime -= 0.016;
+                speed = Math.min(speed, 0.7);
+                if (!myCart.userData.iceMesh) {
+                    const iceGeo = new THREE.BoxGeometry(1.4, 0.9, 2.1);
+                    const iceMat = new THREE.MeshStandardMaterial({ color: 0x8be5ff, transparent: true, opacity: 0.6, roughness: 0.1 });
+                    myCart.userData.iceMesh = new THREE.Mesh(iceGeo, iceMat);
+                    myCart.userData.iceMesh.position.y = 0.35;
+                    myCart.add(myCart.userData.iceMesh);
+                }
+            } else {
+                if (myCart.userData.iceMesh) {
+                    myCart.remove(myCart.userData.iceMesh);
+                    myCart.userData.iceMesh.geometry.dispose();
+                    myCart.userData.iceMesh.material.dispose();
+                    myCart.userData.iceMesh = null;
+                    createParticleBurst(myCart.position, 0xd4f5ff, 15, 0.16);
+                }
+            }
+
+            if (myCart.userData && myCart.userData.wheels) {
+                myCart.userData.wheels.forEach(w => {
+                    w.rotation.x -= speed * 0.12;
+                });
+            }
+
+            // High Performance Particle Render Ticks with Zero Memory Footprint
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.mesh.position.add(p.velocity);
+                p.life -= p.decay;
+                
+                const currentScale = p.life * p.initialSize;
+                p.mesh.scale.set(currentScale, currentScale, currentScale);
+                
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    particles.splice(i, 1);
+                }
+            }
+
+            // Instant mathematical collision offset bounding box
+            tempMyBox.min.set(myCart.position.x - 0.4, myCart.position.y, myCart.position.z - 0.7);
+            tempMyBox.max.set(myCart.position.x + 0.4, myCart.position.y + 0.6, myCart.position.z + 0.7);
+
+            if (!localFinished && !localDead) {
+                for(let o of obstacles) {
+                    if(o.isAnvil && o.mesh.position.y > o.targetY) {
+                        o.gravityVel += 0.015;
+                        o.mesh.position.y = Math.max(o.targetY, o.mesh.position.y - o.gravityVel);
+                        o.box.min.y = o.mesh.position.y - 0.5;
+                        o.box.max.y = o.mesh.position.y + 0.5;
+                    }
+
+                    if(myCart.position.z - o.mesh.position.z > 10 || o.mesh.position.y < -5) continue;
+                    if(tempMyBox.intersectsBox(o.box)) {
+                        if (effects.rainbowBridgeTime > 0) continue;
+                        if (effects.gravityFlipTime > 0) continue;
+
+                        if (o.isTar) {
+                            speed *= 0.4;
+                            createParticleBurst(myCart.position, 0x111111, 4, 0.15);
+                            continue;
+                        }
+
+                        if (o.isBanana) {
+                            effects.spinTime = 1.2;
+                            speed *= 0.5;
+                            SFX.crash();
+                            createParticleBurst(myCart.position, 0xffd700, 15, 0.2);
+                            o.mesh.position.y = -10;
+                            continue;
+                        }
+
+                        if (effects.pixelShieldCount > 0) {
+                            effects.pixelShieldCount--;
+                            o.mesh.position.y = -10;
+                            SFX.crash();
+                            createParticleBurst(myCart.position, 0x39ff14, 20, 0.2);
+                            updateStatusHUDEffects();
+                            continue;
+                        }
+
+                        if (effects.ghostCloakTime > 0) continue;
+
+                        if (effects.giantPacTime > 0) {
+                            o.mesh.position.y = -10;
+                            SFX.crash();
+                            createParticleBurst(myCart.position, 0xffff00, 25, 0.25);
+                            continue;
+                        }
+
+                        if (effects.powerPelletTime > 0) {
+                            o.mesh.position.y = -10;
+                            SFX.crash();
+                            unlockAchievement("pac_destroyer");
+                            createParticleBurst(myCart.position, 0xffff00, 25, 0.25);
+                            continue;
+                        }
+
+                        if (effects.shieldBarrier > 0) {
+                            effects.shieldBarrier--;
+                            o.mesh.position.y = -10;
+                            SFX.crash();
+                            createParticleBurst(myCart.position, 0x00f3ff, 20, 0.2);
+                            updateStatusHUDEffects();
+                            continue;
+                        }
+                        
+                        effects.sadTime = 2.0;
+                        SFX.crash(); 
+                        createParticleBurst(myCart.position, 0xff9900, 30, 0.25);
+                        
+                        lives--;
+                        document.getElementById('lives-count').innerText = lives;
+
+                        if (lives <= 0) {
+                            localDead = true;
+                            lives = 0;
+                            document.getElementById('lives-count').innerText = lives;
+                            
+                            document.getElementById('finish-rank-text').innerText = "☠️ OUT OF LIVES";
+                            document.getElementById('finish-rank-text').style.color = "var(--neon-pink)";
+                            document.getElementById('finish-status').style.display = 'block';
+
+                            if (isHost) {
+                                playersData[peer.id].lives = 0;
+                                checkEndGameConditions();
+                            } else if (hostConnection) {
+                                hostConnection.send({ type: 'outOfLives' });
+                            }
+                        } else {
+                            myCart.position.set(0,0,0); 
+                            speed = 1.5; 
+                            currentLaneIdx = 1; 
+                        }
+                        break;
+                    }
+                }
+
+                for(let pd of pacDots) {
+                    if (pd.active) {
+                        if(myCart.position.z - pd.mesh.position.z < 10) {
+                            if (tempMyBox.intersectsBox(pd.box)) {
+                                pd.active = false;
+                                pd.mesh.visible = false;
+                                SFX.waka();
+                                createParticleBurst(pd.mesh.position, 0xffff00, 6, 0.1);
+                                
+                                // NEW: Award +1 Pac-Coin per eaten Pac-Dot
+                                profile.coins = (profile.coins || 0) + 1;
+                                profile.totalDotsCollected = (profile.totalDotsCollected || 0) + 1;
+                                
+                                if (dotCount < 10) {
+                                    dotCount++;
+                                    if (dotCount === 10) {
+                                        unlockAchievement("double_digit");
+                                    }
+                                    updateDashBarUI();
+                                }
+                                checkCumulativeAchievements();
+                            }
+                        }
+                    }
+                }
+
+                for(let ib of itemBoxes) {
+                    if(ib.active) {
+                        ib.mesh.rotation.y += 0.035;
+                        ib.mesh.rotation.z += 0.015;
+                        ib.mesh.position.y = 0.5 + Math.sin(Date.now() * 0.003 + ib.mesh.position.z) * 0.15;
+
+                        if(myCart.position.z - ib.mesh.position.z < 10) {
+                            if(tempMyBox.intersectsBox(ib.box)) {
+                                ib.active = false; ib.mesh.visible = false; SFX.itemGet();
+                                createParticleBurst(ib.mesh.position, 0xffd700, 18, 0.15);
+                                if(!myItem) { 
+                                    myItem = POWERUPS[Math.floor(Math.random()*POWERUPS.length)]; 
+                                    document.getElementById('item-emoji-hud').innerText = myItem.emoji; 
+                                    document.getElementById('item-name-hud').innerText = myItem.name.toUpperCase();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if(myCart.position.z <= -currentTrackLength && !localFinished) {
+                localFinished = true;
+                if(isHost) {
+                    handlePlayerWin(peer.id);
+                } else if (hostConnection) {
+                    hostConnection.send({type: 'reachedFinish'});
+                }
+            }
+
+            let lbdHtml = "<strong>STANDINGS:</strong><br>"; let sortable = [];
+            for(let id in playersData) {
+                if(id !== peer.id && otherCarts[id]) {
+                    tempVec3.set(playersData[id].x, playersData[id].y, playersData[id].z);
+                    otherCarts[id].position.lerp(tempVec3, 0.2);
+                    
+                    if (playersData[id].lives <= 0) {
+                        otherCarts[id].position.y += (-5 - otherCarts[id].position.y) * 0.1;
+                    }
+
+                    if (otherCarts[id].userData && otherCarts[id].userData.wheels) {
+                        otherCarts[id].userData.wheels.forEach(w => {
+                            w.rotation.x -= 0.2; 
+                        });
+                    }
+                }
+                sortable.push({ name: playersData[id].name, z: playersData[id].z, finished: playersData[id].finished, rank: playersData[id].rank, lives: playersData[id].lives });
+            }
+            
+            sortable.sort((a,b) => {
+                if (a.finished && !b.finished) return -1;
+                if (!a.finished && b.finished) return 1;
+                if (a.finished && b.finished) return a.rank - b.rank;
+                if (a.lives > 0 && b.lives <= 0) return -1;
+                if (a.lives <= 0 && b.lives > 0) return 1;
+                return a.z - b.z;
+            });
+            
+            sortable.forEach((p, i) => {
+                let suffix = "";
+                if (p.finished) suffix = ` (${getOrdinal(p.rank)})`;
+                else if (p.lives <= 0) suffix = " (☠️)";
+                lbdHtml += `${i+1}. ${p.name}${suffix}<br>`;
+            });
+            document.getElementById('leaderboard').innerHTML = lbdHtml;
+
+            // Follow Camera Tracking
+            tempVec3.set(myCart.position.x + camOffset.x, myCart.position.y + 4 + camOffset.y, myCart.position.z + 8);
+            camera.position.lerp(tempVec3, 0.1);
+            camera.lookAt(myCart.position.x, myCart.position.y, myCart.position.z - 5);
+
+            drawMinimap(); 
+            renderer.render(scene, camera);
+        }
+
+        // ==========================================
+        // INPUT CONTROLS & MINIMAP
+        // ==========================================
+        let camOffset = { x: 0, y: 0 }, isDraggingCam = false, lastTouchX = 0, lastTouchY = 0;
+
+        function setupControls() {
+            const bindContinuous = (id, key) => {
+                const btn = document.getElementById(id);
+                btn.addEventListener('touchstart', e => { e.preventDefault(); if(!localFinished && !localDead) input[key] = true; });
+                btn.addEventListener('touchend', e => { e.preventDefault(); input[key] = false; });
+                btn.addEventListener('mousedown', () => { if(!localFinished && !localDead) input[key] = true; });
+                btn.addEventListener('mouseup', () => input[key] = false);
+            };
+            
+            const moveLeft = (e) => { 
+                if(e) e.preventDefault(); 
+                if(currentLaneIdx > 0 && !isCountdown && !localFinished && !localDead) { 
+                    currentLaneIdx--; 
+                    SFX.jump(); 
+                    unlockAchievement("slick_moves");
+                } 
+            };
+            const moveRight = (e) => { 
+                if(e) e.preventDefault(); 
+                if(currentLaneIdx < 3 && !isCountdown && !localFinished && !localDead) { 
+                    currentLaneIdx++; 
+                    SFX.jump(); 
+                    unlockAchievement("slick_moves");
+                } 
+            };
+            
+            document.getElementById('btn-left').addEventListener('touchstart', moveLeft);
+            document.getElementById('btn-left').addEventListener('mousedown', moveLeft);
+            document.getElementById('btn-right').addEventListener('touchstart', moveRight);
+            document.getElementById('btn-right').addEventListener('mousedown', moveRight);
+            
+            document.getElementById('btn-item').addEventListener('touchstart', (e)=>{e.preventDefault(); useItem();});
+            document.getElementById('btn-item').addEventListener('mousedown', useItem);
+
+            document.getElementById('btn-dash-action').addEventListener('touchstart', (e)=>{e.preventDefault(); triggerQuickDash();});
+            document.getElementById('btn-dash-action').addEventListener('mousedown', triggerQuickDash);
+
+            bindContinuous('btn-jump', 'jump'); bindContinuous('btn-fast', 'speedUp'); bindContinuous('btn-slow', 'speedDown');
+
+            renderer.domElement.addEventListener('touchstart', e => { isDraggingCam = true; lastTouchX = e.touches[0].clientX; lastTouchY = e.touches[0].clientY; });
+            renderer.domElement.addEventListener('touchmove', e => {
+                if(!isDraggingCam) return;
+                camOffset.x = Math.max(-5, Math.min(5, camOffset.x - (e.touches[0].clientX - lastTouchX) * 0.05));
+                camOffset.y = Math.max(-2, Math.min(5, camOffset.y + (e.touches[0].clientY - lastTouchY) * 0.05));
+                lastTouchX = e.touches[0].clientX; lastTouchY = e.touches[0].clientY;
+            });
+            renderer.domElement.addEventListener('touchend', () => { isDraggingCam = false; camOffset.x=0; camOffset.y=0; });
+
+            window.addEventListener('keydown', e => {
+                if (!isPlaying || isCountdown || localFinished || localDead) return;
+                const key = e.key.toLowerCase();
+                
+                if (key === 'arrowleft' || key === 'a') {
+                    if (currentLaneIdx > 0) { currentLaneIdx--; SFX.jump(); unlockAchievement("slick_moves"); }
+                }
+                else if (key === 'arrowright' || key === 'd') {
+                    if (currentLaneIdx < 3) { currentLaneIdx++; SFX.jump(); unlockAchievement("slick_moves"); }
+                }
+                else if (key === 'arrowup' || key === 'w' || key === ' ') {
+                    input.jump = true;
+                }
+                else if (key === 'arrowdown' || key === 's') {
+                    useItem();
+                }
+                else if (e.key === 'Shift') {
+                    triggerQuickDash();
+                }
+                else if (key === '+' || key === '=' || key === 'e') {
+                    input.speedUp = true;
+                }
+                else if (key === '-' || key === 'q') {
+                    input.speedDown = true;
+                }
+            });
+
+            window.addEventListener('keyup', e => {
+                const key = e.key.toLowerCase();
+                if (key === '+' || key === '=' || key === 'e') {
+                    input.speedUp = false;
+                }
+                else if (key === '-' || key === 'q') {
+                    input.speedDown = false;
+                }
+                else if (key === 'arrowup' || key === 'w' || key === ' ') {
+                    input.jump = false;
+                }
+            });
+        }
+
+        const mCtx = document.getElementById('minimap').getContext('2d');
+        function drawMinimap() {
+            mCtx.clearRect(0,0, 120, 120);
+            const w = 120, h = 120, myZ = myCart.position.z, viewRange = 200;
+            mCtx.fillStyle = '#333'; mCtx.fillRect(w/2 - 15, 0, 30, h); 
+            const getZtoY = z => h - ((myZ - z) / viewRange) * h;
+
+            mCtx.fillStyle = 'red';
+            for(let o of obstacles) { const my = getZtoY(o.mesh.position.z); if(my >= 0 && my <= h && o.mesh.position.y > -5) mCtx.fillRect(w/2 + o.mesh.position.x*5 - 2, my, 4, 4); }
+            
+            mCtx.fillStyle = 'gold';
+            for(let ib of itemBoxes) { if(ib.active){ const my = getZtoY(ib.mesh.position.z); if(my >= 0 && my <= h) mCtx.fillRect(w/2 + ib.mesh.position.x*5 - 2, my, 4, 4); } }
+
+            mCtx.fillStyle = '#ffff00';
+            for(let pd of pacDots) { if(pd.active){ const my = getZtoY(pd.mesh.position.z); if(my >= 0 && my <= h) mCtx.fillRect(w/2 + pd.mesh.position.x*5 - 1, my, 2, 2); } }
+
+            for(let id in playersData) {
+                const p = playersData[id], my = getZtoY(p.z);
+                if(my >= 0 && my <= h) { 
+                    mCtx.fillStyle = p.color; 
+                    mCtx.beginPath(); 
+                    mCtx.arc(w/2 + p.x*5, my, id === peer.id ? 4 : 3, 0, Math.PI*2); 
+                    mCtx.fill(); 
+                    if(id===peer.id) mCtx.stroke(); 
+                }
+            }
+        }
+    </script>
+</body>
+    </html>
