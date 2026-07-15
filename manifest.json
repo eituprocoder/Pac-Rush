@@ -1,7 +1,7 @@
 {
-  "name": "Pac-Rush - Pac-Man Fan Game Minecart Race",
+  "name": "Pac-Rush",
   "short_name": "Pac-Rush",
-  "description": "Get ready for the ultimate Pac-Man adventure! Race through thrilling minecart tracks, dodge obstacles, master crazy twists, and compete against up to 8 players in a high-speed battle for victory! Only the fastest racer will be the winner!",
+  "categories": "games",
   "start_url": "./index.html",
   "display": "fullscreen",
   "background_color": "#0527ff",
