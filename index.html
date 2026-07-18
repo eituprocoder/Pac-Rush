@@ -96,6 +96,10 @@
         /* Achievement Notification popup */
         #achievement-popup { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0, 255, 22, 0.95); border: 2px solid #ffffff; box-shadow: 0 0 15px var(--neon-green); padding: 12px 24px; border-radius: 8px; color: #000; font-weight: bold; z-index: 1005; display: none; text-align: center; font-size: 0.95rem; }
 
+        /* Spectator Controls HUD Overlay */
+        #spectator-controls { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); background: rgba(10, 10, 25, 0.95); border: 2px solid var(--neon-pink); box-shadow: 0 0 15px var(--neon-pink); border-radius: 10px; padding: 15px; display: none; text-align: center; pointer-events: auto; z-index: 1002; width: 85%; max-width: 320px; }
+        #spectator-controls div { font-family: 'Courier New', Courier, monospace; }
+
         /* Mobile Controls */
         .controls { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; pointer-events: auto; align-items: flex-end; }
         .btn-dir, .btn-action { width: 60px; height: 60px; background: rgba(0, 243, 255, 0.2); border: 2px solid var(--neon-blue); border-radius: 50%; color: white; font-size: 1.5rem; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); margin: 5px;}
@@ -143,6 +147,19 @@
             from { transform: scale(0.8); }
             to { transform: scale(1.2); }
         }
+
+        /* Profile 3D Preview Box */
+        #profile-preview-box {
+            width: 100%;
+            height: 160px;
+            margin: 10px 0;
+            border: 2px dashed var(--neon-blue);
+            box-shadow: 0 0 8px rgba(0, 243, 255, 0.3);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #010103;
+            position: relative;
+        }
     </style>
 </head>
 <body>
@@ -169,12 +186,16 @@
                 <div style="font-size: 0.75rem; margin-top: 5px; text-align: center; color: #aaa;" id="league-next-unlock">Next: Bronze II at 100 Trophies</div>
             </div>
 
-            <input type="text" id="player-name" placeholder="Your Name" maxlength="12" value="Pac-Copilot">
+            <!-- Profile Real-Time 3D preview container -->
+            <label style="color: var(--neon-blue); font-size: 0.85rem; font-weight: bold; text-transform: uppercase;">Live Cart & Copilot Preview:</label>
+            <div id="profile-preview-box"></div>
+
+            <input type="text" id="player-name" placeholder="Your Name" maxlength="12" value="Pac-Copilot" oninput="triggerProfilePreviewUpdate()">
             <label class="file-lbl">Photo<input type="file" id="file-pic" accept="image/*"></label>
-            <label>Cart Color:</label><input type="color" id="player-color" value="#00f3ff">
+            <label>Cart Color:</label><input type="color" id="player-color" value="#00f3ff" oninput="triggerProfilePreviewUpdate()">
             
             <label style="margin-top: 5px; font-weight: bold; color: var(--neon-pink);">Choose Copilot Skin:</label>
-            <select id="player-copilot" onchange="saveProfileData()">
+            <select id="player-copilot" onchange="triggerProfilePreviewUpdate(); saveProfileData();">
                 <!-- Options are updated dynamically by JS based on current League level -->
             </select>
             
@@ -304,6 +325,16 @@
 
         <!-- Finish Rank Status Banner -->
         <div id="finish-status">FINISHED!<br><span id="finish-rank-text" style="font-size: 2.2rem; text-shadow: 0 0 10px var(--neon-blue); color: var(--neon-blue);">1st</span></div>
+
+        <!-- Spectator HUD Interface Overlay -->
+        <div id="spectator-controls">
+            <div style="color: var(--neon-pink); font-weight: bold; margin-bottom: 6px; font-size: 0.85rem; letter-spacing: 1px;">📺 SPECTATOR CAMERA</div>
+            <div id="spectate-target-name" style="color: #fff; font-size: 1.1rem; font-weight: bold; margin-bottom: 12px; text-shadow: 0 0 5px rgba(255,255,255,0.5);">Spectating: Guest</div>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button onclick="cycleSpectator(-1)" style="font-size: 0.8rem; padding: 6px 12px; border-color: var(--neon-pink); color: var(--neon-pink);">◀ PREV</button>
+                <button onclick="cycleSpectator(1)" style="font-size: 0.8rem; padding: 6px 12px; border-color: var(--neon-pink); color: var(--neon-pink);">NEXT ▶</button>
+            </div>
+        </div>
 
         <div class="controls">
             <div class="d-pad">
@@ -665,6 +696,9 @@
 
             updateLeagueAndSkinsUI();
             populateAchievementsUI();
+
+            // Setup Profile Preview
+            initProfilePreview();
         }
 
         function updateLeagueAndSkinsUI() {
@@ -1043,6 +1077,9 @@
         let localDead = false;
         let localRank = null;
         let localRankDisplayShown = false;
+
+        // Spectator System Variables
+        let spectateTargetId = null; 
         
         // Maps Styling
         const MAPS = {
@@ -1521,6 +1558,9 @@
         // Clean arrays to release WebGL context gracefully
         function cleanup3DGame() {
             isPlaying = false;
+            spectateTargetId = null;
+            document.getElementById('spectator-controls').style.display = 'none';
+
             if (animationFrameId) {
                 cancelAnimationFrame(animationFrameId);
                 animationFrameId = null;
@@ -1533,7 +1573,7 @@
 
             if (scene) {
                 scene.traverse(object => {
-                    if (object.isMesh) {
+                    if (object.isMesh || object.isSprite) {
                         if (object.geometry) object.geometry.dispose();
                         if (object.material) {
                             if (Array.isArray(object.material)) {
@@ -1597,8 +1637,10 @@
             localDead = false;
             localRank = null;
             localRankDisplayShown = false;
+            spectateTargetId = peer.id; // Initially spectating/following ourselves
             document.getElementById('lives-count').innerText = lives;
             document.getElementById('finish-status').style.display = 'none';
+            document.getElementById('spectator-controls').style.display = 'none';
 
             // Reset dynamic map length config
             currentTrackLength = LENGTHS[selectedLengthId] ? LENGTHS[selectedLengthId].val : 2000;
@@ -1709,10 +1751,10 @@
 
             playersData[peer.id] = { ...profile, id: peer.id, z: 0, x: 0, y: 0, lives: 10, finished: false, rank: null };
 
-            myCart = createCartMesh(profile.color, profile.copilotType || "yellow"); scene.add(myCart);
+            myCart = createCartMesh(profile.color, profile.copilotType || "yellow", profile.name); scene.add(myCart);
             for(let id in playersData) { 
                 if(id !== peer.id) { 
-                    let c = createCartMesh(playersData[id].color, playersData[id].copilotType || "yellow"); 
+                    let c = createCartMesh(playersData[id].color, playersData[id].copilotType || "yellow", playersData[id].name); 
                     otherCarts[id] = c; 
                     scene.add(c); 
                 } 
@@ -1796,7 +1838,43 @@
             };
         }
 
-        function createCartMesh(hexColor, copilotType = "yellow") {
+        // Helper to generate text name tags as 3D billboarding sprites
+        function createNameSprite(name, colorStr) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, 256, 64);
+            ctx.font = 'Bold 26px Courier New';
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            // Draw neat dark background pill
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.roundRect(10, 8, 236, 48, 12);
+            ctx.fill();
+            
+            // Neon colored text outline
+            ctx.strokeStyle = colorStr || '#00f3ff';
+            ctx.lineWidth = 4;
+            ctx.roundRect(10, 8, 236, 48, 12);
+            ctx.stroke();
+
+            // Label text drawing
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = colorStr || '#00f3ff';
+            ctx.shadowBlur = 8;
+            ctx.fillText(name, 128, 32);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(1.8, 0.45, 1);
+            return sprite;
+        }
+
+        function createCartMesh(hexColor, copilotType = "yellow", pName = "Racer") {
             const group = new THREE.Group();
             const bodyMat = new THREE.MeshStandardMaterial({ 
                 color: hexColor, 
@@ -1847,8 +1925,13 @@
             
             const copilotData = createPacmanCopilot(copilotType);
             group.add(copilotData.mesh);
+
+            // Create and attach floating player name tag above copilot
+            const nameSprite = createNameSprite(pName, hexColor);
+            nameSprite.position.set(0, 1.6, 0.2);
+            group.add(nameSprite);
             
-            group.userData = { wheels: wheels, hexColor: hexColor, copilot: copilotData };
+            group.userData = { wheels: wheels, hexColor: hexColor, copilot: copilotData, nameSprite: nameSprite };
             return group;
         }
 
@@ -1943,6 +2026,9 @@
                     if (localRank === 1) {
                         unlockAchievement("winner_winner");
                     }
+
+                    // Trigger spectator mode HUD automatically once local player finishes
+                    activateSpectatorHud();
                 }
                 checkEndGameConditions();
             }
@@ -1951,6 +2037,7 @@
         function showEndScreen(results) {
             document.getElementById('game-overlay').style.display = 'none'; 
             document.getElementById('ui-layer').style.display = 'flex'; 
+            document.getElementById('spectator-controls').style.display = 'none';
             showPanel('panel-end');
             
             const myResult = results.find(r => r.id === peer.id);
@@ -2156,6 +2243,39 @@
             } else {
                 hud.style.display = "none";
             }
+        }
+
+        // ==========================================
+        // SPECTATOR MODE CORE SYSTEM
+        // ==========================================
+        function activateSpectatorHud() {
+            spectateTargetId = peer.id;
+            const targetNameEl = document.getElementById('spectate-target-name');
+            if (targetNameEl) {
+                targetNameEl.innerText = "Spectating: " + profile.name;
+            }
+            document.getElementById('spectator-controls').style.display = 'block';
+        }
+
+        function cycleSpectator(dir) {
+            const playerIds = Object.keys(playersData);
+            if (playerIds.length <= 1) return;
+
+            let currIndex = playerIds.indexOf(spectateTargetId);
+            if (currIndex === -1) currIndex = 0;
+
+            // Find next valid spectator target (ideally someone still running or alive)
+            let loops = 0;
+            do {
+                currIndex = (currIndex + dir + playerIds.length) % playerIds.length;
+                loops++;
+            } while (loops < playerIds.length && playersData[playerIds[currIndex]].lives <= 0 && !playersData[playerIds[currIndex]].finished && playerIds[currIndex] !== peer.id);
+
+            spectateTargetId = playerIds[currIndex];
+            
+            const nameToDisplay = spectateTargetId === peer.id ? profile.name : playersData[spectateTargetId].name;
+            document.getElementById('spectate-target-name').innerText = "Spectating: " + nameToDisplay;
+            playTone(600, 'sine', 0.1, 0.1);
         }
 
         // ==========================================
@@ -3134,6 +3254,9 @@
                             } else if (hostConnection) {
                                 hostConnection.send({ type: 'outOfLives' });
                             }
+
+                            // Trigger spectator mode HUD automatically once local player dies
+                            activateSpectatorHud();
                         } else {
                             myCart.position.set(0,0,0); 
                             speed = 1.5; 
@@ -3235,10 +3358,27 @@
             });
             document.getElementById('leaderboard').innerHTML = lbdHtml;
 
-            // Follow Camera Tracking
-            tempVec3.set(myCart.position.x + camOffset.x, myCart.position.y + 4 + camOffset.y, myCart.position.z + 8);
+            // Follow Camera Tracking: Follow spectateTargetId if set, otherwise follow local player
+            let trackPosition = myCart.position;
+            if (spectateTargetId && spectateTargetId !== peer.id) {
+                if (otherCarts[spectateTargetId]) {
+                    trackPosition = otherCarts[spectateTargetId].position;
+                }
+            }
+
+            tempVec3.set(trackPosition.x + camOffset.x, trackPosition.y + 4 + camOffset.y, trackPosition.z + 8);
             camera.position.lerp(tempVec3, 0.1);
-            camera.lookAt(myCart.position.x, myCart.position.y, myCart.position.z - 5);
+            camera.lookAt(trackPosition.x, trackPosition.y, trackPosition.z - 5);
+
+            // Make sure player name tags always billboard to face the active camera viewpoint
+            if (myCart.userData && myCart.userData.nameSprite) {
+                myCart.userData.nameSprite.lookAt(camera.position);
+            }
+            for (let id in otherCarts) {
+                if (otherCarts[id] && otherCarts[id].userData && otherCarts[id].userData.nameSprite) {
+                    otherCarts[id].userData.nameSprite.lookAt(camera.position);
+                }
+            }
 
             drawMinimap(); 
             renderer.render(scene, camera);
@@ -3365,6 +3505,119 @@
                 }
             }
         }
+
+        // ==========================================
+        // PROFILE 3D LIVE PREVIEW SCENE SYSTEM
+        // ==========================================
+        let previewScene, previewCamera, previewRenderer, previewCart, previewAnimFrame;
+
+        function initProfilePreview() {
+            const container = document.getElementById('profile-preview-box');
+            if (!container) return;
+
+            // Clear old instances
+            container.innerHTML = "";
+            if (previewAnimFrame) {
+                cancelAnimationFrame(previewAnimFrame);
+            }
+
+            previewScene = new THREE.Scene();
+            previewScene.background = new THREE.Color(0x010103);
+
+            previewCamera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+            previewCamera.position.set(0, 1.8, 3.5);
+
+            previewRenderer = new THREE.WebGLRenderer({ antialias: true });
+            previewRenderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(previewRenderer.domElement);
+
+            const ambient = new THREE.AmbientLight(0xffffff, 1.5);
+            previewScene.add(ambient);
+
+            const dirLight = new THREE.DirectionalLight(0x00f3ff, 2.0);
+            dirLight.position.set(5, 10, 5);
+            previewScene.add(dirLight);
+
+            // Create sample neon rails grid
+            const gridMat = new THREE.LineBasicMaterial({ color: 0x333344 });
+            const gridGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(-1.5, 0, -5), new THREE.Vector3(-1.5, 0, 5),
+                new THREE.Vector3(1.5, 0, -5), new THREE.Vector3(1.5, 0, 5)
+            ]);
+            const rail1 = new THREE.Line(gridGeo, gridMat);
+            previewScene.add(rail1);
+
+            updateProfilePreviewMesh();
+
+            const previewAnimate = () => {
+                previewAnimFrame = requestAnimationFrame(previewAnimate);
+                if (previewCart) {
+                    previewCart.rotation.y += 0.012;
+                    // Keep copilot animated
+                    if (previewCart.userData && previewCart.userData.copilot) {
+                        const topHalf = previewCart.userData.copilot.topHalf;
+                        const bottomHalf = previewCart.userData.copilot.bottomHalf;
+                        if (topHalf && bottomHalf) {
+                            const mouthAngle = (Math.sin(Date.now() * 0.006) + 1) * 0.15;
+                            topHalf.rotation.x = -mouthAngle;
+                            bottomHalf.rotation.x = mouthAngle;
+                        }
+                    }
+                    if (previewCart.userData && previewCart.userData.nameSprite) {
+                        previewCart.userData.nameSprite.lookAt(previewCamera.position);
+                    }
+                }
+                previewRenderer.render(previewScene, previewCamera);
+            };
+            previewAnimate();
+
+            // Resize support
+            window.addEventListener('resize', () => {
+                if (previewRenderer && container.clientWidth > 0) {
+                    previewCamera.aspect = container.clientWidth / container.clientHeight;
+                    previewCamera.updateProjectionMatrix();
+                    previewRenderer.setSize(container.clientWidth, container.clientHeight);
+                }
+            });
+        }
+
+        function updateProfilePreviewMesh() {
+            if (!previewScene) return;
+
+            if (previewCart) {
+                previewScene.remove(previewCart);
+                previewCart.traverse(child => {
+                    if (child.isMesh || child.isSprite) {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(m => m.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
+                    }
+                });
+            }
+
+            const colorInputVal = document.getElementById('player-color').value;
+            const copilotSelectVal = document.getElementById('player-copilot').value || "yellow";
+            const nameVal = document.getElementById('player-name').value || "Player";
+
+            previewCart = createCartMesh(colorInputVal, copilotSelectVal, nameVal);
+            previewCart.position.set(0, 0.15, 0);
+            previewScene.add(previewCart);
+        }
+
+        // Trigger safe preview mesh updates on form inputs changes
+        let previewUpdateTimeout;
+        function triggerProfilePreviewUpdate() {
+            clearTimeout(previewUpdateTimeout);
+            previewUpdateTimeout = setTimeout(() => {
+                updateProfilePreviewMesh();
+            }, 100);
+        }
     </script>
 </body>
-    </html>
+</html>
+
