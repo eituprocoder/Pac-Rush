@@ -4,8 +4,8 @@ const cacheName = 'Pac-Rush';
 const assets = [
   './',
   './index.html
-  'sw.js'
-  'manifest.json'
+  './sw.js'
+  './manifest.json'
 ];
 
 // Evento de instalación: Guarda los archivos en el nuevo caché
