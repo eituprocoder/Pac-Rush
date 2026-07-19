@@ -3616,6 +3616,56 @@
                 updateProfilePreviewMesh();
             }, 100);
         }
+        // ===== PAC-RUSH TRAILER =====
+
+function reproducirTrailer() {
+    // Evita crear dos videos
+    if (document.getElementById("pacrushTrailer")) return;
+
+    const fondo = document.createElement("div");
+    fondo.id = "pacrushTrailer";
+    fondo.style.position = "fixed";
+    fondo.style.left = "0";
+    fondo.style.top = "0";
+    fondo.style.width = "100%";
+    fondo.style.height = "100%";
+    fondo.style.background = "black";
+    fondo.style.display = "flex";
+    fondo.style.alignItems = "center";
+    fondo.style.justifyContent = "center";
+    fondo.style.zIndex = "999999";
+
+    const video = document.createElement("video");
+    video.src = "Pac-Rush Preview trailer.mp4";
+    video.controls = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.style.maxWidth = "100%";
+    video.style.maxHeight = "100%";
+
+    const cerrar = document.createElement("button");
+    cerrar.textContent = "✕";
+    cerrar.style.position = "absolute";
+    cerrar.style.top = "15px";
+    cerrar.style.right = "15px";
+    cerrar.style.fontSize = "30px";
+    cerrar.style.padding = "8px 15px";
+    cerrar.style.cursor = "pointer";
+    cerrar.style.zIndex = "1000000";
+
+    cerrar.onclick = () => {
+        video.pause();
+        fondo.remove();
+    };
+
+    video.onended = () => {
+        fondo.remove();
+    };
+
+    fondo.appendChild(video);
+    fondo.appendChild(cerrar);
+    document.body.appendChild(fondo);
+}
     </script>
 </body>
 </html>
