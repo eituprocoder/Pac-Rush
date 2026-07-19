@@ -3,7 +3,7 @@ const cacheName = 'Pac-Rush';
 
 const assets = [
   './',
-  './index.html
+  './index.html'
   './sw.js'
   './manifest.json'
 ];
